@@ -283,18 +283,38 @@ def verify_user_otp(user_id: int, otp: str, purpose: str | None = None) -> bool:
 
 # -------------------- Forgot password OTP table --------------------
 def _ensure_forgot_pw_table(db):
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS password_reset_otps (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL,
-          otp_hash TEXT NOT NULL,
-          expires_at TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          FOREIGN KEY(user_id) REFERENCES users(id)
+    """
+    IMPORTANT:
+    - SQLite supports: AUTOINCREMENT
+    - Postgres does NOT support AUTOINCREMENT
+    This function creates the table with the right syntax depending on db.kind.
+    """
+    if getattr(db, "kind", "") == "postgres":
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS password_reset_otps (
+              id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+              user_id BIGINT NOT NULL,
+              otp_hash TEXT NOT NULL,
+              expires_at TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
         )
-        """
-    )
+    else:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS password_reset_otps (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              otp_hash TEXT NOT NULL,
+              expires_at TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
     db.commit()
 
 
