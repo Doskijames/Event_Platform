@@ -1,7 +1,7 @@
 # db_core.py
 import os
 import sqlite3
-from datetime import datetime, timezoneA
+from datetime import datetime, timezone
 
 from flask import current_app, g
 from werkzeug.security import generate_password_hash
