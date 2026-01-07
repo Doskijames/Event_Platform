@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+  <h1>{{ event.name }}</h1>
+  <p class="muted">{{ event.date }} • {{ event.location }}</p>
+</div>
+
+<div class="panel">
+  <h2>Event Overview</h2>
+  <p>{{ event.description }}</p>
+
+  <div class="actions-row">
+    <a class="btn btn-outline" href="/events">Back to Events</a>
+    <a class="btn btn-outline" href="{{ url_for('event_logout', event_id=event.id) }}">Lock Event</a>
+  </div>
+
+  <hr class="divider" />
+
+  <h2>Next (coming soon)</h2>
+  <ul class="bullets">
+    <li>RSVP form</li>
+    <li>Approval workflow</li>
+    <li>Email + WhatsApp invite sending</li>
+    <li>QR code generation + AppSheet scanning integration</li>
+  </ul>
+</div>
+
+{% endblock %}

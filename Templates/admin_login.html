@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <div class="panel">
+    <h1 class="accent">Login</h1>
+
+    <form method="POST" class="form">
+      <label class="label">Email</label>
+      <input class="input" type="email" name="email" required>
+
+      <label class="label">Password</label>
+      <input class="input" type="password" name="password" required>
+
+      {% if require_captcha %}
+        <label class="label">Solve {{ captcha_q }}</label>
+        <input class="input" name="captcha" required inputmode="numeric" autocomplete="off">
+      {% endif %}
+
+      <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+        <a class="muted" href="{{ url_for('forgot_password') }}">Forgot your password?</a>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn" type="submit">Login</button>
+        <a class="btn btn-outline" href="{{ url_for('register') }}">Create Account</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/captcha.js') }}"></script>
+{% endblock %}

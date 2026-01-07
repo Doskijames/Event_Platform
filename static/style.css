@@ -1,0 +1,1774 @@
+:root{
+  /* theme-driven */
+  --bg:#000000;
+  --panel:#111111;
+  --text:#ffffff;
+  --muted:#b7b7b7;
+  --accent:#f57c00;
+  --border:rgba(255,255,255,.08);
+  --navH:64px;
+
+  /* extra surfaces (theme-driven) */
+  --surface:#0a0a0a;                 /* inputs */
+  --surface2:#0b0b0b;                /* covers */
+  --topbarBg:rgba(17,17,17,0.75);    /* navbar background */
+  --heroOverlay:rgba(0,0,0,.70);     /* hero overlay */
+  --softPanel:rgba(255,255,255,0.02);
+  --glass:rgba(255,255,255,0.06);
+
+  /* quill (theme-driven) */
+  --quillToolbarBg:var(--surface2);
+  --quillEditorBg:var(--surface2);
+  --quillPickerBg:#111;
+  --quillStroke:var(--text);
+}
+
+/* base */
+*{ box-sizing:border-box; }
+html, body{ height:100%; }
+
+body{
+  margin:0;
+  font-family: Arial, sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  padding-top: var(--navH);
+}
+
+a{ color:inherit; text-decoration:none; }
+.muted{ color:var(--muted); }
+.accent{ color:var(--accent); }
+
+/* NAV */
+.topbar{
+  position:fixed;
+  top:0; left:0; right:0;
+  height:var(--navH);
+  z-index:999;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:0 20px;
+  background:var(--topbarBg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom:1px solid rgba(255,255,255,0.10);
+}
+.nav-left, .nav-right{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  flex-wrap:wrap;
+}
+.brand{ font-weight:900; color:var(--accent); letter-spacing:.3px; }
+.navlink{ color:var(--muted); font-weight:800; }
+.navlink:hover{ color:var(--accent); }
+
+/* THEME TOGGLE (new) */
+.theme-toggle{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.theme-btn{
+  padding:8px 10px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,0.03);
+  color:var(--text);
+  font-weight:900;
+  cursor:pointer;
+}
+.theme-btn:hover{ border-color:rgba(245,124,0,.55); }
+.theme-btn.active{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#000;
+}
+
+/* FLASH */
+.flash-wrap{
+  max-width:1400px;
+  margin:12px auto 0;
+  padding:0 20px;
+}
+.flash{
+  background:rgba(245,124,0,.12);
+  border:1px solid rgba(245,124,0,.35);
+  padding:10px 12px;
+  border-radius:12px;
+  margin-bottom:10px;
+}
+
+/* BASE */
+.container{
+  max-width:1400px;
+  margin:0 auto;
+  padding:28px 20px 60px;
+}
+.panel{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:22px;
+}
+.section{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:26px;
+  margin-top:24px;
+}
+.section h2{ color:var(--accent); margin-top:0; }
+
+/* BUTTONS */
+.btn{
+  display:inline-block;
+  padding:12px 18px;
+  background:var(--accent);
+  color:#000;
+  font-weight:900;
+  border-radius:12px;
+  border:none;
+  cursor:pointer;
+}
+.btn-outline{
+  background:transparent;
+  color:var(--accent);
+  border:1px solid var(--accent);
+}
+.btn:hover{ opacity:.95; }
+
+/* FORMS */
+.form{ display:grid; gap:10px; max-width:520px; }
+.label{ font-weight:900; color:var(--muted); }
+.input{
+  padding:12px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--text);
+  outline:none;
+}
+.input:focus{ border-color:rgba(245,124,0,.65); }
+.textarea{ resize:vertical; min-height:110px; }
+.actions-row{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+/* ADMIN BOX */
+.admin-box{
+  margin-top:12px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:14px;
+  background:var(--softPanel);
+}
+.admin-row{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.mini-label{
+  font-weight:900;
+  color:var(--muted);
+}
+.mini-file{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+  background:var(--surface);
+  color:var(--text);
+}
+.mini-btn{
+  padding:10px 14px;
+  border-radius:12px;
+}
+
+/* HOME HERO (loop video) */
+.hero-video{
+  position:relative;
+  height:100vh;
+  overflow:hidden;
+  background:var(--bg);
+  margin-top: calc(-1 * var(--navH));
+}
+.bg-video{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.bg-overlay{
+  position:absolute;
+  inset:0;
+  background:var(--heroOverlay);
+}
+.hero-foreground{
+  position:relative;
+  z-index:2;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding: calc(var(--navH) + 20px) 20px 20px;
+}
+.logo-main{ width:300px; max-width:85%; display:block; }
+.logo-title{ margin:14px 0 0; color:var(--accent); font-size:2.5rem; font-weight:900; }
+.logo-tagline{ margin:10px 0 0; color:var(--accent); letter-spacing:2px; font-weight:900; font-size:.95rem; }
+.hero-actions{
+  margin-top:18px;
+  display:flex;
+  gap:12px;
+  justify-content:center;
+  flex-wrap:wrap;
+}
+
+/* EVENTS GRID */
+.page-head h1{ margin:0 0 6px; color:var(--accent); }
+
+.events-grid{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:18px;
+  margin-top:18px;
+}
+
+.event-card{
+  display:block;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+  overflow:hidden;
+  transition:transform .15s ease, border-color .15s ease;
+}
+.event-card:hover{
+  transform:translateY(-3px);
+  border-color:rgba(245,124,0,.55);
+}
+
+.event-cover{
+  height:160px;
+  background:var(--surface2);
+  border-bottom:1px solid var(--border);
+}
+.event-cover img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.event-cover-placeholder{
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:var(--muted);
+  font-weight:900;
+}
+
+.event-card-body{ padding:18px; }
+
+.event-card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+
+.event-title{
+  margin:0;
+  font-size:1.15rem;
+  color:var(--accent);
+}
+
+.event-pill{
+  font-size:.75rem;
+  font-weight:900;
+  background:var(--accent);
+  color:#000;
+  padding:6px 10px;
+  border-radius:999px;
+  white-space:nowrap;
+}
+
+.event-meta{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:.95rem;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.dot{ opacity:.7; padding:0 6px; }
+
+.event-description{
+  margin-top:12px;
+  font-size:.95rem;
+  line-height:1.5;
+}
+.event-cta{
+  margin-top:14px;
+  font-weight:900;
+  color:var(--accent);
+}
+
+/* CREATE EVENT CARD */
+.create-card{ border-style:dashed; }
+.create-cover{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.create-plus{
+  width:64px;
+  height:64px;
+  border-radius:18px;
+  background:rgba(245,124,0,0.12);
+  border:1px solid rgba(245,124,0,0.45);
+  color:var(--accent);
+  display:grid;
+  place-items:center;
+  font-size:40px;
+  font-weight:900;
+  line-height:1;
+}
+
+/* EVENT MINI-SITE SHELL */
+.event-shell{
+  max-width:1400px;
+  margin:0 auto;
+  padding:28px 20px 60px;
+}
+.event-titlebar{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.event-titlebar h1{
+  margin:0;
+  color:var(--accent);
+}
+.titlebar-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.event-nav{
+  margin-top:16px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  padding:12px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+}
+.event-navlink{
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  color:var(--muted);
+  font-weight:900;
+  background:rgba(255,255,255,0.02);
+}
+.event-navlink:hover{ color:var(--accent); border-color:rgba(245,124,0,.55); }
+.event-navlink.active{ color:#000; background:var(--accent); border-color:var(--accent); }
+.event-content{ margin-top:16px; }
+
+/* JOY-STYLE EVENT HOME */
+.joy-hero{
+  position:relative;
+  border-radius:22px;
+  overflow:hidden;
+  border:1px solid var(--border);
+  background:var(--surface2);
+}
+.joy-hero-img{
+  width:100%;
+  height:440px;
+  object-fit:cover;
+  display:block;
+  filter:saturate(1.02) contrast(1.02);
+}
+.joy-hero-placeholder{
+  height:440px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:linear-gradient(180deg, rgba(245,124,0,0.12), rgba(0,0,0,0.92));
+  text-align:center;
+  padding:26px;
+}
+.joy-hero-overlay{
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+  align-items:center;
+  text-align:center;
+  padding:34px 18px;
+  background:linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.78) 60%, rgba(0,0,0,0.92) 100%);
+}
+.joy-names{
+  margin:0;
+  font-size:2.2rem;
+  font-weight:900;
+  color:var(--accent);
+  text-shadow:0 10px 24px rgba(0,0,0,0.55);
+}
+.joy-message{
+  margin:10px 0 16px;
+  color:#e9e9e9;
+  font-weight:700;
+  max-width:820px;
+  line-height:1.5;
+}
+.joy-cta{
+  display:inline-block;
+  padding:12px 18px;
+  border-radius:999px;
+  background:var(--accent);
+  color:#000;
+  font-weight:900;
+  border:1px solid var(--accent);
+}
+.joy-cta:hover{ opacity:.95; }
+
+.joy-date-card{
+  margin-top:18px;
+  border-radius:22px;
+  border:1px solid rgba(255,255,255,0.12);
+  background:var(--glass);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding:20px 18px;
+  text-align:center;
+}
+.joy-date-weekday{
+  color:var(--accent);
+  font-weight:900;
+  letter-spacing:1px;
+  text-transform:uppercase;
+  font-size:.95rem;
+}
+.joy-date-long{
+  margin-top:6px;
+  font-size:1.35rem;
+  font-weight:900;
+  color:var(--text);
+}
+.joy-date-location{
+  margin-top:6px;
+  color:var(--muted);
+  font-weight:800;
+}
+.joy-countdown{
+  margin-top:14px;
+  display:flex;
+  justify-content:center;
+  gap:16px;
+  flex-wrap:wrap;
+  color:var(--text);
+  font-weight:900;
+  letter-spacing:.7px;
+}
+.joy-countdown-value{
+  color:var(--accent);
+  font-size:1.25rem;
+  margin-right:6px;
+}
+.joy-unlock{
+  margin-top:14px;
+  display:inline-block;
+  padding:12px 18px;
+  border-radius:999px;
+  color:var(--accent);
+  border:1px solid rgba(245,124,0,0.55);
+  background:rgba(245,124,0,0.10);
+  font-weight:900;
+}
+.joy-unlock:hover{ border-color:rgba(245,124,0,0.9); }
+
+/* SECTION CARD (other pages) */
+.section-card{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:22px;
+}
+.section-image{
+  width:100%;
+  max-height:360px;
+  object-fit:cover;
+  display:block;
+  border-radius:16px;
+  border:1px solid var(--border);
+  margin:14px 0;
+}
+.section-text{
+  margin:0;
+  line-height:1.7;
+  font-size:1.05rem;
+}
+
+/* RSVP list */
+.rsvp-list{ display:grid; gap:10px; }
+.rsvp-item{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:12px;
+  background:var(--softPanel);
+}
+
+/* FOOTER */
+.footer{
+  background:var(--panel);
+  border-top:1px solid var(--border);
+  padding:18px 20px;
+}
+.footer-inner{
+  max-width:1400px;
+  margin:0 auto;
+  position:relative;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  text-align:center;
+}
+.footer-ig{
+  position:absolute;
+  right:0;
+  top:50%;
+  transform:translateY(-50%);
+  width:34px;
+  height:34px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  opacity:.95;
+}
+.ig-icon{ width:18px; height:18px; fill:var(--accent); }
+.footer-ig:hover{ opacity:1; }
+
+/* =========================
+   QUILL DARK POLISH
+   ========================= */
+.ql-toolbar.ql-snow{
+  border:1px solid var(--border) !important;
+  border-bottom:none !important;
+  background:var(--quillToolbarBg) !important;
+  border-radius:16px 16px 0 0 !important;
+}
+.ql-container.ql-snow{
+  border:1px solid var(--border) !important;
+  background:var(--quillEditorBg) !important;
+  color:var(--text) !important;
+  border-radius:0 0 16px 16px !important;
+}
+.ql-editor{ color:var(--text) !important; }
+.ql-snow .ql-picker{ color:var(--text) !important; }
+.ql-snow .ql-stroke{ stroke:var(--quillStroke) !important; }
+.ql-snow .ql-fill{ fill:var(--quillStroke) !important; }
+.ql-snow .ql-picker-options{
+  background:var(--quillPickerBg) !important;
+  border:1px solid var(--border) !important;
+}
+.story-public p, .story-public li{ line-height:1.8; }
+
+/* QUILL FONT MAPPINGS (YOUR LIST) */
+.ql-font-inter { font-family:"Inter", sans-serif; }
+.ql-font-satoshi { font-family:"Satoshi", sans-serif; }
+.ql-font-manrope { font-family:"Manrope", sans-serif; }
+.ql-font-ribes { font-family:"Ribes", sans-serif; }
+.ql-font-aspekta { font-family:"Aspekta", sans-serif; }
+.ql-font-domine { font-family:"Domine", serif; }
+.ql-font-ojuju { font-family:"Ojuju", sans-serif; }
+.ql-font-instrument-serif { font-family:"Instrument Serif", serif; }
+.ql-font-barlow { font-family:"Barlow", sans-serif; }
+.ql-font-chakra-petch { font-family:"Chakra Petch", sans-serif; }
+.ql-font-unbounded { font-family:"Unbounded", sans-serif; }
+.ql-font-tanker { font-family:"Tanker", sans-serif; }
+.ql-font-public-sans { font-family:"Public Sans", sans-serif; }
+.ql-font-ortica { font-family:"Ortica", serif; }
+.ql-font-space-grotesk { font-family:"Space Grotesk", sans-serif; }
+.ql-font-cabinet-grotesk { font-family:"Cabinet Grotesk", sans-serif; }
+.ql-font-pencerio { font-family:"Pencerio", serif; }
+.ql-font-stardom { font-family:"Stardom", serif; }
+.ql-font-zodiak { font-family:"Zodiak", serif; }
+.ql-font-melodrama { font-family:"Melodrama", serif; }
+.ql-font-archivo { font-family:"Archivo", sans-serif; }
+.ql-font-eb-garamond { font-family:"EB Garamond", serif; }
+.ql-font-caprasimo { font-family:"Caprasimo", cursive; }
+.ql-font-gambarino { font-family:"Gambarino", serif; }
+.ql-font-epilogue { font-family:"Epilogue", sans-serif; }
+
+.ql-font-serif { font-family: Georgia, "Times New Roman", serif; }
+.ql-font-monospace{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+/* RESPONSIVE */
+@media (max-width: 900px){
+  :root{ --navH:72px; }
+  .events-grid{ grid-template-columns:repeat(2, 1fr); }
+  .logo-title{ font-size:2.2rem; }
+  .joy-hero-img, .joy-hero-placeholder{ height:380px; }
+}
+@media (max-width: 520px){
+  :root{ --navH:78px; }
+  .events-grid{ grid-template-columns:1fr; }
+  .logo-title{ font-size:2rem; }
+  .logo-main{ width:240px; }
+  .joy-hero-img, .joy-hero-placeholder{ height:320px; }
+  .joy-names{ font-size:1.75rem; }
+}
+
+/* =========================
+   EDITOR PREVIEW MODES
+   ========================= */
+.preview-controls{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  margin:10px 0 12px;
+}
+.preview-btn{
+  padding:8px 10px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,0.03);
+  color:var(--text);
+  font-weight:900;
+  cursor:pointer;
+}
+.preview-btn.active{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#000;
+}
+.preview-frame{
+  border:1px solid var(--border);
+  border-radius:18px;
+  background:var(--surface2);
+  padding:14px;
+}
+.preview-frame.phone{
+  max-width:420px;
+  margin:0 auto;
+}
+
+
+/* =====================================================
+   Shared split-panel section layout (Story/Proposal/Meet/Custom)
+   ===================================================== */
+/* Public Story layout matches the Preview’s split-panel design */
+  .public-story-wrap {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.02);
+  }
+  .public-story-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 420px;
+  }
+  .public-story-left {
+    background: #0b0b0b;
+    position: relative;
+    min-height: 320px;
+  }
+  .public-story-left img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .public-story-badge {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 14px 16px;
+    background: linear-gradient(180deg, transparent, rgba(0,0,0,0.85));
+  }
+  .public-story-badge .event-name {
+    font-weight: 900;
+    color: var(--accent);
+    font-size: 1.15rem;
+    line-height: 1.2;
+  }
+  .public-story-right {
+    padding: 22px 22px 18px;
+    background: rgba(255,255,255,0.02);
+  }
+  .public-story-right .story-title {
+    margin: 0;
+    font-weight: 900;
+    color: var(--accent);
+    font-size: 1.35rem;
+  }
+  /* Keep the inner scroll feel from Preview on desktop, but avoid awkward tiny boxes on mobile */
+  .public-story-content {
+    margin-top: 14px;
+    max-height: 520px;
+    overflow: auto;
+    padding-right: 8px;
+  }
+  .public-story-content .ql-editor {
+    padding: 0;
+  }
+  @media (max-width: 820px) {
+    .public-story-grid { grid-template-columns: 1fr; }
+    .public-story-content { max-height: none; overflow: visible; padding-right: 0; }
+  }
+
+
+
+
+
+/* =====================================================
+   Public single-page (Joy-like) — drawer nav + no horizontal scroll
+   ===================================================== */
+body{ overflow-x:hidden; }
+
+/* Wider canvas */
+.event-shell{ max-width: 1400px; }
+
+/* Layout: sticky slideshow (left) + document scroll (right) */
+.joy-single-wrap.public-single{
+  display:grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 18px;
+  align-items:start;
+}
+
+/* Ensure both panes fill the same viewport height (under fixed topbar) */
+.joy-single-wrap.public-single{
+  height: calc(100dvh - var(--navH));
+  overflow: hidden;           /* only right pane scrolls */
+  align-items: stretch;       /* make columns equal height */
+}
+
+/* Left panel should stretch to full container height */
+.joy-single-wrap.public-single .joy-single-left{
+  height: 100%;
+  top: 0;                     /* keep perfectly aligned with right pane */
+  align-self: stretch;
+}
+
+/* Right panel is the ONLY scroller */
+.joy-single-wrap.public-single .joy-single-right{
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;         /* prevent horizontal scroll */
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Sections snap like slides */
+.joy-single-wrap.public-single .joy-section{
+  min-height: 100%;
+  scroll-snap-align: start;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Slideshow images: show full picture (no zoom/crop) */
+.joy-single-wrap.public-single .joy-slide{
+  object-fit: contain;
+}
+
+/* Left panel */
+.joy-single-left{
+  position: sticky;
+  top: calc(var(--navH) + 16px);
+  height: 100%;
+  min-width: 0;
+}
+.joy-slideshow{
+  height: 100%;
+  border:1px solid var(--border);
+  border-radius: 22px;
+  overflow:hidden;
+  background: var(--surface2);
+}
+.joy-slideshow img{
+  width:100%;
+  height:100%;
+  object-fit: contain;
+  display:block;
+}
+.joy-slideshow{ background: var(--surface2); }
+.joy-slideshow img{ background: rgba(0,0,0,0.08); }
+
+/* Right pane is the scroller (internal), not the whole page */
+.joy-single-wrap.public-single{
+  /* same visible height for both panes: viewport under the fixed topbar */
+  height: 100%;
+  align-items: stretch;
+}
+
+/* Right pane: internal scroll with snap + visible scrollbar; no sideways scroll */
+.joy-single-right{
+  min-width:0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+  padding-right: 6px; /* keeps content off the scrollbar */
+}
+
+/* Each section behaves like a "slide" in the scroller */
+.joy-section{
+  scroll-margin-top: 0;            /* we're not using page scroll */
+  scroll-snap-align: start;
+  min-height: 100%;
+}
+
+/* Prevent any horizontal scroll in the scroller content */
+.joy-single-right *{ max-width: 100%; }
+.joy-single-right .joy-section-card,
+.joy-single-right .ql-editor{
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.joy-single-right img{ max-width:100%; height:auto; }
+/* Drawer */
+
+.joy-burger:hover{ border-color: rgba(245,124,0,.55); }
+
+.joy-drawer-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1990;
+}
+
+.joy-drawer{
+  position: fixed;
+  top: var(--navH);
+  left: 0;
+  bottom: 0;
+  width: min(340px, 86vw);
+  background: rgba(17,17,17,0.92);
+  border-right: 1px solid rgba(255,255,255,0.12);
+  z-index: 1995;
+  padding: 14px 14px 18px;
+  overflow: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.joy-drawer-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding: 6px 6px 12px;
+}
+.joy-drawer-title{
+  font-weight: 900;
+  color: var(--accent);
+  font-size: 1.05rem;
+}
+.joy-drawer-close{
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  font-weight: 900;
+  cursor:pointer;
+}
+.joy-drawer-close:hover{ border-color: rgba(245,124,0,.55); }
+
+.joy-nav{
+  display:grid;
+  gap:10px;
+  padding: 6px;
+}
+.joy-nav-link{
+  display:block;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border:1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  color: var(--muted);
+  font-weight: 900;
+}
+.joy-nav-link:hover{
+  color: var(--accent);
+  border-color: rgba(245,124,0,.55);
+}
+
+/* Mobile */
+@media (max-width: 980px){
+  .joy-single-wrap.public-single{
+    grid-template-columns: 1fr;
+  }
+  .joy-single-left{
+    position: relative;
+    top: 0;
+    height: 360px;
+  }
+  
+}
+
+
+/* =========================
+   PUBLIC SINGLE-PAGE (hamburger + sticky image + scrolling content)
+   ========================= */
+html, body { overflow-x: hidden; }
+
+.event-shell.public-single-shell{
+  max-width: 1500px; /* wider public view */
+  padding: 18px 18px 60px;
+}
+
+/* Make the split layout a bit roomier (similar to editor public preview) */
+.joy-layout{
+  grid-template-columns: 1fr 1fr !important;
+}
+
+/* Burger lives inside the left pane */
+.joy-left{ position: relative; }
+.joy-burger{
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 30;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(255,255,255,0.92);
+  color:#000;
+  font-weight: 900;
+}
+
+/* Right pane: NEVER allow sideways scroll; wrap long words/links */
+.joy-right{
+  overflow-x: hidden;
+}
+.joy-right *{
+  max-width: 100%;
+}
+.joy-right .joy-section-card,
+.joy-right .ql-editor{
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.joy-right img{
+  max-width:100%;
+  height:auto;
+}
+
+/* Make home right-pane content feel like the admin home card */
+.joy-home-right{
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+.joy-home-date{
+  border: 1px solid rgba(0,0,0,0.10);
+}
+
+/* Mobile: stack panes; image becomes normal (not sticky), burger stays top-left */
+@media (max-width: 900px){
+  .event-shell.public-single-shell{ max-width: 1100px; padding: 14px 14px 50px; }
+  .joy-layout{ grid-template-columns: 1fr !important; }
+  .joy-left{ position: relative; min-height: 240px; }
+  .joy-left-inner{ position: relative; height: 320px; }
+  .joy-burger{ top: 14px; left: 14px; }
+}
+
+/* =====================================================
+   PUBLIC ALL SECTIONS — SAME HEIGHT PANES + RIGHT SCROLL ONLY
+   ===================================================== */
+html, body { overflow-x: hidden; }
+
+/* The full two-pane frame */
+.joy-single{
+  width: min(1800px, 100vw);
+  max-width: none;
+  margin: 0 auto;
+  padding: 14px 14px 40px;
+
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: stretch;     /* IMPORTANT: both columns stretch to same height */
+
+  /* lock the frame height so left + right match */
+  height: calc(100vh - var(--navH) - 24px);
+  overflow: hidden;         /* IMPORTANT: prevent a second scroller */
+}
+
+/* LEFT: sticky slideshow */
+.joy-single-left{
+  position: sticky;
+  top: calc(var(--navH) + 12px);
+  height: 100%;             /* SAME AS RIGHT */
+  min-width: 0;
+  overflow: hidden;         /* no scrollbars here */
+  border-radius: 18px;
+}
+
+/* Slideshow container fills the left pane */
+.joy-slideshow{
+  height: 100%;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--surface2);
+  position: relative;
+}
+
+/* Slides fill left pane */
+.joy-slide{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+
+  opacity: 0;
+  transition: opacity 450ms ease;
+  will-change: opacity;
+}
+.joy-slide.is-active{ opacity: 1; }
+
+/* RIGHT: this is the ONLY vertical scroller */
+.joy-single-right{
+  height: 100%;             /* SAME AS LEFT */
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+
+  /* Snap between sections (optional but recommended) */
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+
+/* Each section acts like a "page" in the right pane */
+.joy-section{
+  min-height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  margin: 0 0 14px;
+}
+
+/* Content card fills the section height */
+.joy-section-inner{
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.02);
+  padding: 18px;
+
+  overflow-x: hidden;
+}
+
+/* ✅ Never allow sideways scroll from long content */
+.joy-single-right,
+.joy-single-right *{
+  max-width: 100%;
+}
+.joy-html,
+.joy-html *{
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.joy-html.ql-editor{
+  white-space: normal !important;
+  overflow-x: hidden !important;
+}
+
+/* Drawer overlay stays above everything */
+.joy-drawer-backdrop{ z-index: 1990; }
+.joy-drawer{ z-index: 1995; }
+
+/* Mobile: stack panes, normal page scroll */
+@media (max-width: 980px){
+  .joy-single{
+    grid-template-columns: 1fr;
+    height: auto;           /* let page scroll naturally */
+    overflow: visible;
+  }
+
+  .joy-single-left{
+    position: relative;
+    top: 0;
+    height: 320px;
+  }
+
+  .joy-single-right{
+    height: auto;
+    overflow: visible;
+    scroll-snap-type: none;
+    padding-right: 0;
+  }
+
+  .joy-section,
+  .joy-section-inner{
+    min-height: auto;
+  }
+}
+
+
+/* =====================================================================
+   PUBLIC SINGLE-PAGE EVENT VIEW (event_public_all_sections.html)
+   Goals:
+   ✅ left & right panes same height
+   ✅ left pane stays fixed while right pane scrolls
+   ✅ slideshow image transitions (handled by JS) but images are NOT zoomed
+   ✅ no horizontal scroll anywhere
+   ✅ hamburger drawer works (handled by JS)
+   ✅ mobile stacks properly
+   ===================================================================== */
+
+/* Never allow sideways scroll in public single-page */
+html, body { overflow-x: hidden; }
+body { overscroll-behavior-x: none; }
+
+/* Make the event canvas wider for public single page */
+.event-shell.public-single-shell,
+.event-shell.public-single,
+.event-shell[data-public-single="1"]{
+  max-width: 1600px;
+}
+
+/* Split layout container */
+.joy-single{
+  /* Fill viewport under fixed topbar, so both panes match height */
+  height: calc(100vh - var(--navH) - 24px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  align-items: stretch;
+  overflow: hidden; /* ensures only right pane scrolls */
+}
+
+/* Left pane: fixed (no scrolling) */
+.joy-single-left{
+  position: relative;
+  height: 100%;
+  min-width: 0;
+}
+
+/* Slideshow frame */
+.joy-slideshow{
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--surface2);
+  position: relative;
+}
+
+/* Crossfade slides */
+.joy-slide{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  /* IMPORTANT: show full image without "zooming" */
+  object-fit: contain;
+  object-position: center;
+  background: #0b0b0b;
+  opacity:0;
+  transition: opacity .45s ease;
+}
+.joy-slide.is-active{ opacity: 1; }
+
+/* Left overlay + title */
+.joy-left-overlay{
+  position:absolute;
+  left:0; right:0; bottom:0;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,0.80));
+  pointer-events:none;
+}
+.joy-left-title{
+  font-weight: 900;
+  color: var(--accent);
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+/* Burger sits inside left pane */
+.joy-burger{
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 50;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.joy-burger:hover{ border-color: rgba(245,124,0,.55); }
+
+/* Right pane: ONLY scroll area */
+.joy-single-right{
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  scroll-behavior: smooth;
+
+  /* Optional: subtle snapping like your reference video */
+  scroll-snap-type: y mandatory;
+}
+
+/* Each section = one "screen" */
+.joy-section{
+  min-height: 100%;
+  padding: 0;
+  scroll-snap-align: start;
+  scroll-margin-top: 10px;
+}
+
+/* Card-like inner */
+.joy-section-inner{
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(255,255,255,0.02);
+  padding: 22px;
+  overflow: hidden; /* avoid accidental inner scrollbars */
+}
+
+/* Section title */
+.joy-section-title{
+  margin: 0 0 14px;
+  font-weight: 900;
+  color: var(--accent);
+  font-size: 1.45rem;
+}
+
+/* Ensure rich text never causes sideways scroll */
+.joy-single-right *{
+  max-width: 100%;
+}
+.joy-html,
+.joy-single-right .ql-editor,
+.joy-single-right .story-public{
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.joy-single-right img{
+  max-width:100%;
+  height:auto;
+}
+
+/* HOME layout inside right pane: fit and center like admin home */
+.joy-home-inline{
+  display:flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.joy-home-inline .joy-date-card{
+  margin-top: 0;
+  max-width: 100%;
+}
+
+/* Drawer backdrop + drawer */
+.joy-drawer-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1990;
+}
+.joy-drawer{
+  position: fixed;
+  top: var(--navH);
+  left: 0;
+  bottom: 0;
+  width: min(360px, 86vw);
+  background: rgba(17,17,17,0.92);
+  border-right: 1px solid rgba(255,255,255,0.12);
+  z-index: 1995;
+  padding: 14px 14px 18px;
+  overflow: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.joy-drawer-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding: 6px 6px 12px;
+}
+.joy-drawer-title{
+  font-weight: 900;
+  color: var(--accent);
+  font-size: 1.05rem;
+}
+.joy-drawer-close{
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  font-weight: 900;
+  cursor:pointer;
+}
+.joy-drawer-close:hover{ border-color: rgba(245,124,0,.55); }
+.joy-nav{
+  display:grid;
+  gap:10px;
+  padding: 6px;
+}
+.joy-nav-link{
+  display:block;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border:1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  color: var(--muted);
+  font-weight: 900;
+}
+.joy-nav-link:hover{
+  color: var(--accent);
+  border-color: rgba(245,124,0,.55);
+}
+
+/* Mobile: stack panes, slideshow becomes top banner, right pane becomes page scroll */
+@media (max-width: 980px){
+  .joy-single{
+    height: auto;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+  .joy-single-left{
+    height: 320px;
+  }
+  .joy-single-right{
+    height: auto;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .joy-section{
+    min-height: auto;
+  }
+  .joy-section-inner{
+    height: auto;
+  }
+}
+
+
+
+/* =====================================================
+   PUBLIC VIEW: fixed split panes + TWO right-side scrollers
+   - Main content scrolls in .event-content (scrollbar #1)
+   - Section rail scrolls in .event-nav (scrollbar #2)
+   ===================================================== */
+body.public-single,
+body.public-single body{
+  overflow: hidden;
+}
+
+.public-single-shell{
+  /* ensure fixed header doesn't overlap content */
+  padding-top: var(--navH);
+  height: 100dvh;
+  box-sizing: border-box;
+}
+
+.public-single-shell .event-shell{
+  height: 100%;
+}
+
+.public-single-shell .joy-single-wrap.public-single,
+.public-single-shell .joy-single-wrap{
+  display: flex;
+  height: calc(100dvh - var(--navH));
+  overflow: hidden;
+  align-items: stretch;
+}
+
+/* Left pane stays same height as right */
+.public-single-shell .joy-single-left{
+  flex: 0 0 45%;
+  height: 100%;
+  position: sticky;
+  top: 0; /* sticky within wrapper */
+  overflow: hidden;
+}
+
+/* Ensure slideshow fills the left pane */
+.public-single-shell .joy-slideshow{
+  height: 100%;
+}
+.public-single-shell .joy-slideshow img,
+.public-single-shell #joySlide{
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* show full image */
+  background: #000;
+}
+
+/* Right side becomes a 2-column area: content + rail */
+.public-single-shell .event-content{
+  flex: 1 1 auto;
+  height: 100%;
+  overflow-y: auto;      /* scrollbar #1 */
+  overflow-x: hidden;    /* no horizontal scroll */
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;          /* allow wrapping */
+}
+
+/* Each section snaps like slides */
+.public-single-shell .event-content .joy-section{
+  min-height: 100%;
+  scroll-snap-align: start;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Rail: second scrollbar for section navigation */
+.public-single-shell .event-nav{
+  position: absolute;
+  right: 0;
+  top: var(--navH);
+  height: calc(100dvh - var(--navH));
+  width: 60px;
+  overflow-y: auto;     /* scrollbar #2 */
+  overflow-x: hidden;
+  padding: 10px 8px;
+  box-sizing: border-box;
+  border-left: 1px solid var(--border);
+  background: rgba(0,0,0,0.02);
+  z-index: 10;
+}
+
+/* Make room so content doesn't sit under the rail */
+.public-single-shell .event-content{
+  padding-right: 70px;
+}
+
+/* Rail links as dots */
+.public-single-shell .event-nav .event-navlink{
+  display: block;
+  width: 100%;
+  padding: 10px 0;
+  text-align: center;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.public-single-shell .event-nav .event-navlink::before{
+  content: "";
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 0 auto 6px auto;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.35);
+}
+.public-single-shell .event-nav .event-navlink.active::before{
+  background: var(--accent);
+}
+
+/* Hamburger stays top-left inside left pane */
+.public-single-shell .joy-burger,
+.public-single-shell #joyBurger{
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+}
+
+/* No horizontal scroll anywhere */
+.public-single-shell *{
+  max-width: 100%;
+}
+
+
+
+/* ===== Public scroller: show CURRENT section title in a sticky header ===== */
+.joy-right-header{
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 10px 16px;
+  font-weight: 700;
+  letter-spacing: .2px;
+  background: rgba(0,0,0,.12);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+/* Keep section titles in DOM for JS, but hide inside content to avoid the next section title peeking in */
+#joyScroll .joy-section-title{
+  display: none;
+}
+
+/* Ensure snap sections always fill the viewport of the right scroller */
+#joyScroll .joy-section{
+  height: 100%;
+  min-height: 100%;
+  scroll-snap-stop: always;
+}
+
+
+
+
+
+/* Per-section titles in right pane (top-left of each section, not sticky) */
+#joyScroll .joy-section{
+  position: relative;
+}
+
+#joyScroll .joy-section-title{
+  margin: 0 0 16px 0;
+  text-align: left;
+  font-weight: 800;
+  letter-spacing: .2px;
+  font-size: 28px;
+  color: var(--accent, #ff8a00);
+  text-shadow: 0 8px 22px rgba(0,0,0,.35);
+}
+
+
+/* ===== Public right pane section title ===== */
+#joyScroll .joy-section-title{
+  margin: 0 0 16px 0;
+  text-align: left;
+  font-weight: 800;
+  letter-spacing: .2px;
+  font-size: 28px;
+  color: var(--accent, #ff8a00);
+  text-shadow: 0 8px 22px rgba(0,0,0,.35);
+}
+
+
+/* Accessibility helper */
+.sr-only{
+  position:absolute !important;
+  width:1px !important;
+  height:1px !important;
+  padding:0 !important;
+  margin:-1px !important;
+  overflow:hidden !important;
+  clip:rect(0,0,0,0) !important;
+  white-space:nowrap !important;
+  border:0 !important;
+}
+
+
+/* ===== Per-section name (top-left of each right-pane box) ===== */
+#joyScroll .joy-section-inner{
+  position: relative;
+  padding-top: 56px; /* room for section name */
+}
+
+#joyScroll .joy-section-head{
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  pointer-events: none;
+}
+
+#joyScroll .joy-section-name{
+  font-weight: 800;
+  letter-spacing: .2px;
+  font-size: 22px;
+  color: var(--accent, #ff8a00);
+  text-shadow: 0 8px 22px rgba(0,0,0,.35);
+}
+
+
+/* ===== Public Tidbits cards ===== */
+#joyScroll .joy-tidbits-list{
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 6px;
+}
+
+#joyScroll .joy-tidbit-card{
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 16px;
+  padding: 18px 18px;
+  background: rgba(255,255,255,0.03);
+}
+
+#joyScroll .joy-tidbit-q{
+  color: var(--accent, #ff8a00);
+  font-weight: 900;
+  margin-bottom: 10px;
+  text-transform: none;
+}
+
+#joyScroll .joy-tidbit-a{
+  color: rgba(255,255,255,0.92);
+  font-weight: 600;
+}
+
+
+/* ===== Public Q&A / Tidbits cards ===== */
+#joyScroll .joy-qa-list{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  margin-top:6px;
+}
+
+#joyScroll .joy-qa-card{
+  border:1px solid rgba(255,255,255,0.14);
+  border-radius:16px;
+  padding:18px 18px;
+  background:rgba(255,255,255,0.03);
+}
+
+#joyScroll .joy-qa-q{
+  color: var(--accent, #ff8a00);
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+#joyScroll .joy-qa-a{
+  color: rgba(255,255,255,0.92);
+  font-weight: 600;
+}
+
+
+/* ===== Admin editor preview mirrors public ===== */
+.joy-preview-frame{
+  border:1px solid var(--border);
+  border-radius:18px;
+  overflow:hidden;
+  background:rgba(255,255,255,0.02);
+}
+
+.joy-preview-split{
+  display:flex;
+  min-height:420px;
+  height:420px;
+}
+
+.joy-preview-left{
+  flex:1 1 50%;
+  background:#0b0b0b;
+  position:relative;
+  overflow:hidden;
+}
+
+.joy-preview-left img{
+  width:100%;
+  height:100%;
+  object-fit:contain; /* match public (no zoom/crop) */
+  display:block;
+  background:#000;
+}
+
+.joy-preview-right{
+  flex:1 1 50%;
+  padding:18px;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+
+.joy-preview-right h3{
+  margin:0 0 12px;
+  color:var(--accent);
+}
+
+
+/* ===== Admin editor grid layout ===== */
+.admin-editor-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.admin-editor-grid > .section-card{
+  min-width: 0; /* prevents overflow pushing columns */
+}
+
+@media (max-width: 980px){
+  .admin-editor-grid{
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ===== FIX: Show section titles + allow tall sections (no clipping) ===== */
+#joyScroll .joy-section-title{
+  display: block !important;   /* override earlier display:none */
+}
+
+/* Let each section grow to fit its content (prevents long text being cut off) */
+#joyScroll .joy-section{
+  height: auto !important;
+  min-height: calc(100vh - var(--navH, 0px)) !important;
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+}
+
+/* Snap should not trap tall content */
+#joyScroll{
+  scroll-snap-type: y proximity !important;
+}
+
+/* ===== QA/Tidbits public cards ===== */
+.joy-qa-q,
+.joy-tidbit-q{
+  color: var(--accent, #ff8a00);
+  font-weight: 900;
+  margin: 0 0 10px 0;
+}
+
+.joy-qa-a,
+.joy-tidbit-a{
+  color: rgba(255,255,255,0.92);
+  font-weight: 600;
+  white-space: pre-wrap;   /* preserve newlines */
+  word-break: break-word;
+  margin: 0;
+}
+
+/* ===== Auto-grow textareas ===== */
+textarea.joy-autogrow{
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+}

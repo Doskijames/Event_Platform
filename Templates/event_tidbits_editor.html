@@ -1,0 +1,488 @@
+{% extends "event_base.html" %}
+{% block event_content %}
+
+{% if is_admin %}
+
+<div style="display:flex; justify-content:flex-end; gap:10px; margin: 0 0 12px 0; flex-wrap:wrap;">
+  {% if public_preview_url %}
+    <a href="{{ public_preview_url }}" target="_blank" class="btn"
+       style="text-decoration:none; padding:10px 14px; border-radius:12px; font-weight:900; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.14);">
+    </a>
+  {% endif %}
+</div>
+
+<div class="admin-editor-grid">
+
+
+  <!-- LEFT: Editor -->
+  <div class="section-card">
+
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div>
+        <h2 class="accent" style="margin:0;">Tidbits</h2>
+        <p class="muted" style="margin:6px 0 0;">
+          Add custom question &amp; answer tidbits. Preview updates instantly.
+          Guests only see it after you click <strong>Save</strong>.
+        </p>
+      </div>
+
+      <form id="publishForm" method="POST" action="{{ url_for('tidbits_publish', slug=event.slug) }}">
+        <input type="hidden" name="draft_json" id="publishDraftJson" value="">
+        <button class="btn" type="submit">Save</button>
+      </form>
+    </div>
+
+    <div class="admin-box" style="margin-top:14px;">
+      <form method="POST" enctype="multipart/form-data"
+            action="{{ url_for('upload_section_image', slug=event.slug, section_key=section_key) }}">
+        <div class="admin-row">
+          <label class="mini-label">Tidbits Photo</label>
+          <input class="mini-file" type="file" name="image" required>
+          <button class="btn mini-btn" type="submit">Upload</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="admin-box" style="margin-top:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <div class="mini-label">Tidbits</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-outline" type="button" id="addItemBtn">+ Add Tidbit</button>
+          <button class="btn btn-outline" type="button" id="saveDraftNowBtn">Save Draft Now</button>
+        </div>
+      </div>
+
+      <div id="itemsWrap" style="margin-top:12px; display:grid; gap:12px;"></div>
+
+      <input type="hidden" id="draftJsonField" value='{{ tidbits_draft_items|tojson }}'>
+    
+
+<script>
+(function(){
+  const form = document.getElementById("publishForm");
+  if(!form) return;
+  form.addEventListener("submit", ()=>{
+    const draftField = document.getElementById("draftJsonField");
+    const publishField = document.getElementById("publishDraftJson");
+    if(draftField && publishField){
+      publishField.value = draftField.value || "[]";
+    }
+  });
+})();
+</script>
+
+</div>
+
+    <div class="admin-box" style="margin-top:14px;">
+      <form method="POST" action="{{ url_for('toggle_section', slug=event.slug, section_key=section_key) }}">
+        <button class="btn btn-outline" type="submit">
+          {% if section.visible %}Hide Tidbits{% else %}Show Tidbits{% endif %}
+        </button>
+      </form>
+    </div>
+
+    <p class="muted" id="autosaveStatus" style="margin:12px 2px 0; font-weight:900;"></p>
+    <script type="application/json" id="publishedJson">{{ tidbits_published_items|tojson }}</script>
+
+  </div>
+
+  <!-- RIGHT: Preview -->
+  <div class="section-card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div class="muted" style="font-weight:900;">Preview</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline" type="button" id="btnDesk">Desktop</button>
+        <button class="btn btn-outline" type="button" id="btnPhone">Phone</button>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div id="previewDesk" style="display:block;">
+        <div style="border:1px solid var(--border); border-radius:18px; overflow:hidden; background:rgba(255,255,255,0.02);">
+          <div style="display:grid; grid-template-columns: 1fr 3fr; min-height:420px;">
+
+            <div style="background:#0b0b0b;">
+              {% if section.image %}
+                <img src="{{ url_for('static', filename='uploads/' + section.image) }}"
+                     alt="Tidbits preview"
+                     style="width:100%; height:100%; object-fit:cover; display:block;">
+              {% else %}
+                <div style="height:100%; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                  Upload Tidbits Photo
+                </div>
+              {% endif %}
+            </div>
+
+            <div style="padding:18px; max-height:420px; overflow:auto;">
+              <h3 style="margin:0 0 12px; color:var(--accent);">Tidbits</h3>
+              <div id="previewContentDesk" style="display:grid; gap:12px;"></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div id="previewPhone" style="display:none;">
+        <div style="max-width:360px; margin:0 auto; border:1px solid var(--border); border-radius:24px; overflow:hidden;">
+          <div style="background:#0b0b0b;">
+            {% if section.image %}
+              <img src="{{ url_for('static', filename='uploads/' + section.image) }}"
+                   alt="Tidbits phone preview"
+                   style="width:100%; height:260px; object-fit:cover; display:block;">
+            {% else %}
+              <div style="height:260px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                Upload Tidbits Photo
+              </div>
+            {% endif %}
+          </div>
+
+          <div style="padding:16px; background:rgba(255,255,255,0.02); max-height:420px; overflow:auto;">
+            <h3 style="margin:0 0 12px; color:var(--accent);">Tidbits</h3>
+            <div id="previewContentPhone" style="display:grid; gap:12px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  const btnDesk = document.getElementById("btnDesk");
+  const btnPhone = document.getElementById("btnPhone");
+  const prevDeskWrap = document.getElementById("previewDesk");
+  const prevPhoneWrap = document.getElementById("previewPhone");
+
+  btnDesk.addEventListener("click", ()=>{
+    prevDeskWrap.style.display = "block";
+    prevPhoneWrap.style.display = "none";
+  });
+  btnPhone.addEventListener("click", ()=>{
+    prevDeskWrap.style.display = "none";
+    prevPhoneWrap.style.display = "block";
+  });
+})();
+</script>
+
+<script>
+(function(){
+  const wrap = document.getElementById("itemsWrap");
+  const addBtn = document.getElementById("addItemBtn");
+  const saveNowBtn = document.getElementById("saveDraftNowBtn");
+  const statusEl = document.getElementById("autosaveStatus");
+  const draftField = document.getElementById("draftJsonField");
+  
+  const pubField = document.getElementById("publishDraftJson");const saveUrl = "{{ url_for('tidbits_save_draft', slug=event.slug) }}";
+
+  function setStatus(msg){ statusEl.textContent = msg || ""; }
+
+  function safeParse(jsonStr){
+    try {
+      const v = JSON.parse(jsonStr || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch(e) {
+      return [];
+    }
+  }
+
+  function normalize(items){
+    return (items || []).map(it => {
+      if(!it || typeof it !== "object") return { q:"", a:"" };
+      const q = (it.q ?? it.question ?? "").toString();
+      const a = (it.a ?? it.answer ?? "").toString();
+      return { q, a };
+    });
+  }
+
+  let items = normalize(safeParse(draftField.value));
+  const published = normalize(safeParse(document.getElementById("publishedJson").textContent));
+  if (!items.length && published.length) items = published;
+
+  let lastSent = "";
+  let dirty = false;
+  let timer = null;
+  let inflight = false;
+
+  function escapeHtml(s){
+    return (s ?? "").toString()
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  function itemRow(it, idx){
+    const row = document.createElement("div");
+    row.className = "rsvp-item";
+    row.style.background = "rgba(255,255,255,0.02)";
+    row.style.borderRadius = "14px";
+
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div class="mini-label">Tidbit ${idx + 1}</div>
+        <button type="button" class="btn btn-outline" data-action="remove">Remove</button>
+      </div>
+      <div style="display:grid; gap:10px; margin-top:10px;">
+        <div>
+          <div class="label" style="font-size:.9rem;">Question</div>
+          <input class="input" type="text" data-field="q" value="${escapeHtml(it.q)}" placeholder="Enter question">
+        </div>
+        <div>
+          <div class="label" style="font-size:.9rem;">Answer</div>
+          <textarea class="joy-autogrow input textarea" data-field="a" placeholder="Enter answer">${escapeHtml(it.a)}</textarea>
+        </div>
+      </div>
+    `;
+
+    row.querySelector('[data-action="remove"]').addEventListener("click", ()=>{
+      items.splice(idx, 1);
+      render();
+      scheduleSave();
+    });
+
+    row.querySelectorAll("[data-field]").forEach(el => {
+      el.addEventListener("input", ()=>{
+        const f = el.getAttribute("data-field");
+        items[idx][f] = el.value;
+        dirty = true;
+        renderPreview();
+        scheduleSave();
+      });
+    });
+
+    return row;
+  }
+
+  function render(){
+    wrap.innerHTML = "";
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.fontWeight = "900";
+      empty.textContent = "No tidbits yet. Click Add to create one.";
+      wrap.appendChild(empty);
+    } else {
+      items.forEach((it, idx) => wrap.appendChild(itemRow(it, idx)));
+    }
+    renderPreview();
+  }
+
+  function renderPreview(){
+    const desk = document.getElementById("previewContentDesk");
+    const phone = document.getElementById("previewContentPhone");
+
+    const filtered = normalize(items).filter(it => (it.q.trim() || it.a.trim()));
+    const html = filtered.map(it => `
+      <div style="border:1px solid var(--border); border-radius:14px; padding:12px; background:rgba(255,255,255,0.02);">
+        <div class="joy-qa-q">${escapeHtml(it.q)}</div>
+        <div class="joy-qa-a">${escapeHtml(it.a)}</div>
+      </div>
+    `).join("");
+
+    desk.innerHTML = html || '<div class="muted" style="font-weight:900;">Add tidbits to see a preview.</div>';
+    phone.innerHTML = html || '<div class="muted" style="font-weight:900;">Add tidbits to see a preview.</div>';
+  }
+
+  function currentPayload(){
+    const cleaned = normalize(items).filter(it => (it.q.trim() || it.a.trim()));
+    return JSON.stringify(cleaned, null, 0);
+  }
+
+  async function sendDraft(payload){
+    if (inflight) return;
+    inflight = true;
+    try {
+      setStatus("Saving draft...");
+      const resp = await fetch(saveUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ draft_json: payload }).toString(),
+        keepalive: true
+      });
+      setStatus(resp.ok ? "Draft saved." : "Draft save failed.");
+      if (resp.ok) dirty = false;
+    } catch(e) {
+      setStatus("Draft save failed.");
+    } finally {
+      inflight = false;
+    }
+  }
+
+  function scheduleSave(){
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(()=>{
+      const payload = currentPayload();
+      if (payload !== lastSent) {
+        lastSent = payload;
+        draftField.value = payload;
+        
+        if (pubField) pubField.value = payload;dirty = true;
+        sendDraft(payload);
+      }
+    }, 650);
+  }
+
+  // Try hard to persist drafts even if user navigates away quickly
+  window.addEventListener("beforeunload", ()=>{
+    try {
+      if (!dirty) return;
+      const payload = currentPayload();
+      if (!payload) return;
+      const fd = new FormData();
+      fd.append("draft_json", payload);
+      navigator.sendBeacon(saveUrl, fd);
+    } catch(e) {}
+  });
+
+  saveNowBtn.addEventListener("click", ()=>{
+    const payload = currentPayload();
+    lastSent = payload;
+    draftField.value = payload;
+    dirty = true;
+    sendDraft(payload);
+  });
+
+  addBtn.addEventListener("click", ()=>{
+    items.push({ q:"", a:"" });
+    dirty = true;
+    render();
+    scheduleSave();
+  });
+
+
+const publishForm = document.getElementById("publishForm");
+if (publishForm) {
+  publishForm.addEventListener("submit", () => {
+    const cleaned = normalize(items).filter(it => (it.q.trim() || it.a.trim()));
+    const payload = JSON.stringify(cleaned, null, 0);
+    if (pubField) pubField.value = payload;
+  });
+}
+
+  render();
+  setStatus("");
+})();
+</script>
+
+{% else %}
+
+<!-- NORMAL USERS: match event_story_editor.html public view -->
+{% set hero_img = (section.image or (sections.get('home').image if sections.get('home') else '')) %}
+
+<div class="section-card" style="padding:0;">
+  <div class="public-story-wrap">
+    <div class="public-story-grid">
+      <div class="public-story-left">
+        {% if hero_img %}
+          <img src="{{ url_for('static', filename='uploads/' + hero_img) }}"
+               alt="Event image">
+        {% else %}
+          <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+            Event Photo
+          </div>
+        {% endif %}
+        <div class="public-story-badge">
+          <div class="event-name">{{ event.name }}</div>
+        </div>
+      </div>
+
+      <div class="public-story-right">
+        <h2 class="story-title">Tidbits</h2>
+        <div class="public-story-content">
+          {% if tidbits_published_items and tidbits_published_items|length > 0 %}
+            <div style="display:grid; gap:12px;">
+              {% for it in tidbits_published_items %}
+                <div style="border:1px solid var(--border); border-radius:14px; padding:12px; background:rgba(255,255,255,0.02);">
+                  <div style="color:var(--accent); font-weight:900;">{{ it.q }}</div>
+                  <div style="margin-top:8px; line-height:1.6;">{{ it.a }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="muted" style="font-weight:900;">Nothing here yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+<script>
+(function(){
+  function joyAutoGrow(el){
+    const resize = () => {
+      el.style.height = "auto";
+      el.style.height = (el.scrollHeight) + "px";
+    };
+    el.addEventListener("input", resize);
+    resize();
+  }
+  document.querySelectorAll("textarea.joy-autogrow").forEach(joyAutoGrow);
+})();
+</script>
+
+
+<script>
+(function(){
+  function injectPreviewFix(iframe){
+    if(!iframe) return;
+    function apply(){
+      try{
+        var doc = iframe.contentDocument || iframe.contentWindow.document;
+        if(!doc) return;
+
+        // Inject CSS once
+        if(!doc.getElementById("joy-preview-fix-style")){
+          var style = doc.createElement("style");
+          style.id = "joy-preview-fix-style";
+          style.textContent = `
+            .joy-qa-a, .joy-tidbit-a, .qa-a, .tidbit-a{
+              white-space: pre-wrap !important;
+              overflow-wrap: anywhere !important;
+              word-break: break-word !important;
+            }
+            .joy-qa-q, .joy-tidbit-q, .qa-q, .tidbit-q{
+              color: var(--accent, #ff8a00) !important;
+              font-weight: 900 !important;
+            }
+          `;
+          doc.head && doc.head.appendChild(style);
+        }
+
+        // Strip "Q:" / "A:" prefixes if they exist as text
+        var qNodes = doc.querySelectorAll(".joy-qa-q, .joy-tidbit-q, .qa-q, .tidbit-q");
+        qNodes.forEach(function(n){
+          var t = (n.textContent || "").trimStart();
+          if(t.startsWith("Q:")) n.textContent = t.replace(/^Q:\s*/,"");
+        });
+
+        var aNodes = doc.querySelectorAll(".joy-qa-a, .joy-tidbit-a, .qa-a, .tidbit-a");
+        aNodes.forEach(function(n){
+          var t = (n.textContent || "").trimStart();
+          if(t.startsWith("A:")) n.textContent = t.replace(/^A:\s*/,"");
+        });
+
+      }catch(e){}
+    }
+    iframe.addEventListener("load", apply);
+    // If already loaded
+    setTimeout(apply, 50);
+  }
+
+  function boot(){
+    var iframe = document.querySelector("iframe.joy-preview-iframe") || document.querySelector("iframe");
+    injectPreviewFix(iframe);
+  }
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", boot);
+  }else{
+    boot();
+  }
+})();
+</script>
