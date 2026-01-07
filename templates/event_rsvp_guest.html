@@ -1,0 +1,60 @@
+{% extends "event_base.html" %}
+{% block event_content %}
+
+<div class="section-card">
+  <h2 class="accent" style="margin:0;">RSVP</h2>
+  <p class="muted" style="margin:8px 0 0;">Please confirm your attendance.</p>
+
+  <div style="margin-top:14px;">
+    <form method="POST" class="form" action="{{ url_for('rsvp_submit', slug=event.slug) }}">
+
+      <label class="label">Full name</label>
+      <input class="input" type="text" name="full_name" required>
+
+      <label class="label">Email</label>
+      <input class="input" type="email" name="email" required>
+
+      <label class="label">Phone (optional)</label>
+      <input class="input" type="text" name="phone" placeholder="+234...">
+
+      <label class="label">Will you attend?</label>
+      <select class="input" name="attendance" required>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+        <option value="maybe">Maybe</option>
+      </select>
+
+      <label class="label">Number of guests</label>
+      <input class="input" type="number" name="guests" value="0" min="0" max="20">
+
+      <label class="label">Notes (optional)</label>
+      <textarea class="input textarea" name="notes" rows="3"></textarea>
+
+      {% for q in published_items %}
+        {% if q.type == "textarea" %}
+          <label class="label">{{ q.label }}</label>
+          <textarea class="input textarea" name="q__{{ q.key }}" rows="4"></textarea>
+
+        {% elif q.type == "select" %}
+          <label class="label">{{ q.label }}</label>
+          <select class="input" name="q__{{ q.key }}">
+            {% for opt in q.options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+
+        {% else %}
+          <label class="label">{{ q.label }}</label>
+          <input class="input" type="text" name="q__{{ q.key }}">
+        {% endif %}
+      {% endfor %}
+
+      <div class="actions-row">
+        <button class="btn" type="submit">Submit RSVP</button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+{% endblock %}
