@@ -1,10 +1,18 @@
 # db_core.py (FULL - corrected to be compatible with photos_routes.py)
 import os
 import sqlite3
+import psycopg2
 from datetime import datetime, timezone
 from flask import current_app, g
 from werkzeug.security import generate_password_hash
 
+def get_connection():
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        # Render Postgres URL sometimes starts with postgres://
+        # psycopg2 expects postgresql:// or postgres:// works in many cases
+        return psycopg2.connect(db_url)
+    return sqlite3.connect("app.db")
 
 # -------------------- small helpers --------------------
 def now_iso() -> str:
