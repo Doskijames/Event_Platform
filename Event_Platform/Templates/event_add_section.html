@@ -1,0 +1,36 @@
+{% extends "event_base.html" %}
+{% block event_content %}
+
+<div class="section-card">
+  <h2 class="accent" style="margin:0;">Add Section</h2>
+  <p class="muted" style="margin:6px 0 0;">
+    Create a new section for this event. You can choose a Free Text section or a Question &amp; Answer section.
+  </p>
+
+  <div class="admin-box" style="margin-top:14px;">
+    <form method="POST" action="{{ url_for('add_section', slug=event.slug) }}">
+      <div style="display:grid; gap:12px;">
+        <div>
+          <div class="label">Section name</div>
+          <input class="input" type="text" name="name" placeholder="e.g. Travel Info" required>
+        </div>
+
+        <div>
+          <div class="label">Section type</div>
+          <select class="input" name="section_type" required>
+            <option value="" disabled selected>Select a type</option>
+            <option value="free_text">Free Text</option>
+            <option value="qa">Question &amp; Answer</option>
+          </select>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;">
+          <button class="btn" type="submit">Create Section</button>
+          <a class="btn btn-outline" href="{{ url_for('event_section', slug=event.slug, section_key='home') }}">Cancel</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

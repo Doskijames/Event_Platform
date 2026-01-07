@@ -1,0 +1,31 @@
+:root{
+  /* ✅ Your exact grey */
+  --bg:#616161;
+
+  /* panels/surfaces tuned around #616161 for depth */
+  --panel:#6b6b6b;              /* slightly lighter than bg */
+  --text:#ffffff;
+  --muted:rgba(255,255,255,.78);
+  --accent:#f57c00;
+
+  /* borders are slightly stronger in grey mode */
+  --border:rgba(255,255,255,.16);
+
+  /* inputs / cards / covers */
+  --surface:#5a5a5a;            /* slightly darker than bg */
+  --surface2:#545454;           /* covers / deep surfaces */
+
+  /* navbar + hero */
+  --topbarBg:rgba(97,97,97,0.82);  /* glassy grey */
+  --heroOverlay:rgba(0,0,0,.35);
+
+  /* soft panels + glass blocks (date card etc.) */
+  --softPanel:rgba(255,255,255,0.08);
+  --glass:rgba(255,255,255,0.10);
+
+  /* Quill styling in grey mode */
+  --quillToolbarBg:rgba(90,90,90,0.95);
+  --quillEditorBg:rgba(84,84,84,0.88);
+  --quillPickerBg:#5a5a5a;
+  --quillStroke:var(--text);
+}
