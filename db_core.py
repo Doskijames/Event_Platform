@@ -1,7 +1,7 @@
 # db_core.py
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezoneA
 
 from flask import current_app, g
 from werkzeug.security import generate_password_hash
@@ -9,6 +9,32 @@ from werkzeug.security import generate_password_hash
 import psycopg2
 import psycopg2.extras
 
+
+def row_get(row, key, default=None):
+    """
+    Works with:
+    - sqlite3.Row (your local SQLite)
+    - dict rows (Postgres RealDictCursor)
+    - tuples/lists (fallback)
+    """
+    if row is None:
+        return default
+
+    # Postgres (RealDictCursor returns dict-like)
+    if isinstance(row, dict):
+        return row.get(key, default)
+
+    # SQLite Row behaves like mapping
+    try:
+        return row[key]
+    except Exception:
+        pass
+
+    # Fallback if row is tuple/list and key is int
+    if isinstance(key, int) and isinstance(row, (tuple, list)) and 0 <= key < len(row):
+        return row[key]
+
+    return default
 
 # ----------------------------
 # Helpers
