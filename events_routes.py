@@ -7,7 +7,7 @@ from flask import (
     render_template, request, redirect, url_for,
     session, flash, abort, current_app
 )
-\1
+from werkzeug.utils import secure_filename
 from gdrive_storage import drive_enabled, upload_file_to_drive
 
 from db_core import get_db, ensure_default_sections
