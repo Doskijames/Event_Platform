@@ -1,23 +1,9 @@
 # gdrive_storage.py
-# Google Drive storage helper for Flask uploads.
-#
-# Setup required env vars on Render:
-# - GOOGLE_SERVICE_ACCOUNT_JSON  (service account json as a single line / raw json)
-#   OR GOOGLE_SERVICE_ACCOUNT_FILE (path to json file)
-# - GDRIVE_FOLDER_ID             (the Drive folder where uploads will be stored)
-#
-# Optional:
-# - GDRIVE_MAKE_PUBLIC="1"       (default 1) -> shares "anyone with link can view"
-#
-# Notes:
-# - This uses a *service account*. You MUST share your Drive folder with the service
-#   account email (Editor access) so it can upload files there.
-
-from __future__ import annotations
-
-import json
 import os
-from typing import Optional, Tuple, BinaryIO
+import io
+import json
+import base64
+from typing import Optional, Dict, Any, Tuple
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -27,106 +13,156 @@ from googleapiclient.http import MediaIoBaseUpload
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
-def drive_enabled() -> bool:
-    return bool(_get_folder_id() and (_get_sa_json() or os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")))
+def _load_service_account_info() -> Dict[str, Any]:
+    """
+    Loads Google service account JSON from env.
 
+    Supported env vars (choose ONE):
+    - GOOGLE_SERVICE_ACCOUNT_JSON: raw JSON string
+    - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: base64 encoded JSON string
 
-def _get_folder_id() -> str:
-    return (os.getenv("GDRIVE_FOLDER_ID") or "").strip()
+    Handles private_key formatting where newlines are stored as '\\n'.
+    """
+    raw_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
+    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 
-
-def _get_sa_json() -> Optional[dict]:
-    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        # Sometimes users paste JSON with newlines; try to recover
+    if raw_b64:
         try:
-            return json.loads(raw.replace("\n", "
-"))
-        except Exception:
-            return None
+            decoded = base64.b64decode(raw_b64).decode("utf-8")
+            raw = decoded.strip()
+        except Exception as e:
+            raise RuntimeError(f"Invalid GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: {e}")
+
+    if not raw:
+        raise RuntimeError(
+            "Missing Google service account credentials. "
+            "Set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64."
+        )
+
+    # If the JSON is stored with escaped newlines in private_key, fix it
+    # (this is the most common Render/ENV formatting issue)
+    raw_fixed = raw.replace("\\n", "\n")
+
+    try:
+        info = json.loads(raw_fixed)
+    except Exception as e:
+        raise RuntimeError(f"GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: {e}")
+
+    # Also ensure private_key has real newlines if present
+    pk = info.get("private_key")
+    if isinstance(pk, str):
+        info["private_key"] = pk.replace("\\n", "\n")
+
+    return info
 
 
-def _get_credentials():
-    info = _get_sa_json()
-    if info:
-        return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+def drive_enabled() -> bool:
+    """
+    Returns True when Drive integration is properly configured.
+    """
+    has_creds = bool(
+        (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip())
+        or (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip())
+    )
+    has_folder = bool(os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip())
+    return has_creds and has_folder
 
-    path = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
-    if path:
-        return service_account.Credentials.from_service_account_file(path, scopes=SCOPES)
 
-    raise RuntimeError("Google Drive credentials not configured")
-
-
-def _drive_service():
-    creds = _get_credentials()
-    # cache_discovery=False avoids a warning on some environments
+def get_drive_service():
+    """
+    Builds a Google Drive API service using service account credentials.
+    """
+    info = _load_service_account_info()
+    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-def _maybe_make_public(service, file_id: str) -> None:
-    make_public = (os.getenv("GDRIVE_MAKE_PUBLIC", "1").strip() != "0")
-    if not make_public:
-        return
-
-    # Allow anyone with the link to read (view) the file
-    service.permissions().create(
-        fileId=file_id,
-        body={"type": "anyone", "role": "reader"},
-        fields="id",
-    ).execute()
+def drive_file_view_url(file_id: str) -> str:
+    return f"https://drive.google.com/file/d/{file_id}/view"
 
 
-def public_view_url(file_id: str) -> str:
-    # Works for images/audio in <img>/<audio> in most cases
-    return f"https://drive.google.com/uc?export=view&id={file_id}"
-
-
-def upload_fileobj(
-    fp: BinaryIO,
+def upload_file_to_drive(
+    *,
     filename: str,
+    file_bytes: bytes,
     mime_type: str = "application/octet-stream",
     folder_id: Optional[str] = None,
-) -> Tuple[str, str]:
-    """Uploads a file-like object to Drive.
-
-    Returns: (file_id, public_url)
+    make_public: bool = True,
+) -> Dict[str, str]:
     """
-    folder_id = folder_id or _get_folder_id()
+    Uploads bytes to Google Drive. Returns:
+      { "file_id": "...", "view_url": "...", "download_url": "..." }
+
+    Notes:
+    - If make_public=True, sets "anyone with the link can read".
+      This is useful for publicly-viewable images in templates.
+    """
     if not folder_id:
-        raise RuntimeError("GDRIVE_FOLDER_ID not set")
+        folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() or None
+    if not folder_id:
+        raise RuntimeError("Missing GOOGLE_DRIVE_FOLDER_ID")
 
-    service = _drive_service()
+    service = get_drive_service()
 
-    file_metadata = {"name": filename, "parents": [folder_id]}
-    media = MediaIoBaseUpload(fp, mimetype=mime_type, resumable=True)
+    metadata = {"name": filename, "parents": [folder_id]}
+    media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=False)
 
     created = service.files().create(
-        body=file_metadata,
+        body=metadata,
         media_body=media,
-        fields="id",
+        fields="id, webViewLink, webContentLink",
         supportsAllDrives=True,
     ).execute()
 
     file_id = created["id"]
-    _maybe_make_public(service, file_id)
 
-    return file_id, public_view_url(file_id)
+    if make_public:
+        # Public read permission (anyone with link)
+        service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+
+    # webViewLink might exist depending on response; we also provide a stable URL
+    view_url = created.get("webViewLink") or drive_file_view_url(file_id)
+    download_url = created.get("webContentLink") or f"https://drive.google.com/uc?id={file_id}&export=download"
+
+    return {
+        "file_id": file_id,
+        "view_url": view_url,
+        "download_url": download_url,
+    }
 
 
-def upload_filestorage(file_storage, filename: str, folder_id: Optional[str] = None) -> Tuple[str, str]:
-    """Uploads a Werkzeug FileStorage (request.files['...'])"""
+def upload_filestorage_to_drive(
+    file_storage,
+    *,
+    filename: Optional[str] = None,
+    folder_id: Optional[str] = None,
+    make_public: bool = True,
+) -> Dict[str, str]:
+    """
+    Convenience wrapper for Flask's FileStorage (request.files['...']).
+    """
+    if file_storage is None:
+        raise ValueError("file_storage is None")
+
+    data = file_storage.read()
+    # reset stream so Flask doesn't get confused if reused
+    try:
+        file_storage.stream.seek(0)
+    except Exception:
+        pass
+
+    final_name = filename or getattr(file_storage, "filename", None) or "upload.bin"
     mime_type = getattr(file_storage, "mimetype", None) or "application/octet-stream"
-    stream = getattr(file_storage, "stream", None) or file_storage
-    return upload_fileobj(stream, filename=filename, mime_type=mime_type, folder_id=folder_id)
 
-
-# Backwards-compatible helper name used in some routes
-def upload_file_to_drive(file_storage, filename: str, folder_id: Optional[str] = None) -> str:
-    """Uploads a Flask FileStorage to Drive and returns the public URL."""
-    _file_id, url = upload_filestorage(file_storage, filename=filename, folder_id=folder_id)
-    return url
+    return upload_file_to_drive(
+        filename=final_name,
+        file_bytes=data,
+        mime_type=mime_type,
+        folder_id=folder_id,
+        make_public=make_public,
+    )
