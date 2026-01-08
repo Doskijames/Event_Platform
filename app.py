@@ -67,9 +67,23 @@ def create_app():
         init_db()
         ensure_default_admin()
 
+    # --------------------
+    # Media URL helper (local uploads OR full URLs such as Google Drive links)
+    # --------------------
+    from flask import url_for
+
+    def media_url(value: str) -> str:
+        value = (value or "").strip()
+        if not value:
+            return ""
+        if value.startswith("http://") or value.startswith("https://"):
+            return value
+        return url_for("static", filename=f"uploads/{value}")
+
+    app.jinja_env.globals["media_url"] = media_url
+
+
     return app
-
-
 print(">>> app.py starting")
 app = create_app()
 print(">>> app created, starting server on http://127.0.0.1:5000")
