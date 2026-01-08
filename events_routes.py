@@ -7,7 +7,8 @@ from flask import (
     render_template, request, redirect, url_for,
     session, flash, abort, current_app
 )
-from werkzeug.utils import secure_filename
+\1
+from gdrive_storage import drive_enabled, upload_file_to_drive
 
 from db_core import get_db, ensure_default_sections
 from utils_core import (
@@ -209,7 +210,10 @@ def register_event_routes(app):
 
         filename = secure_filename(file.filename)
         unique_name = f"{slug}-{section_key}-{secrets.token_hex(6)}-{filename}"
-        file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name))
+        if drive_enabled():
+            unique_name = upload_file_to_drive(file, unique_name)
+        else:
+            file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name))
 
         db = get_db()
         db.execute("""
