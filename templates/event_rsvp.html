@@ -1,0 +1,519 @@
+{% extends "event_base.html" %}
+{% block event_content %}
+
+<div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; align-items:start;">
+
+  <!-- LEFT -->
+  <div class="section-card">
+
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div>
+        <h2 class="accent" style="margin:0;">RSVP</h2>
+        <p class="muted" style="margin:6px 0 0;">
+          {% if is_admin %}
+            Add RSVP questions. Questions are saved as Question_1, Question_2, etc.
+            Preview updates instantly. Only commits when you click Save.
+          {% else %}
+            Please complete your RSVP below.
+          {% endif %}
+        </p>
+      </div>
+
+      {% if is_admin %}
+        <form method="POST" action="{{ url_for('rsvp_flow_publish', slug=event.slug) }}">
+          <button class="btn" type="submit">Save</button>
+        </form>
+      {% endif %}
+    </div>
+
+    {% if not is_admin %}
+      <form method="POST" action="{{ url_for('rsvp_submit', slug=event.slug) }}" class="form" style="margin-top:16px; max-width:none;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
+            <label class="label">First Name *</label>
+            <input class="input" type="text" name="first_name" required>
+          </div>
+          <div>
+            <label class="label">Last Name *</label>
+            <input class="input" type="text" name="last_name" required>
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Email (auto-filled)</label>
+          <input class="input" type="email" value="{{ user_email }}" readonly>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 160px 1fr; gap:12px;">
+          <div>
+            <label class="label">Country Code</label>
+            <select class="input" name="country_code" required>
+              <option value="+234" selected>+234 (Nigeria)</option>
+              <option value="+1">+1 (USA/Canada)</option>
+              <option value="+44">+44 (UK)</option>
+              <option value="+27">+27 (South Africa)</option>
+              <option value="+233">+233 (Ghana)</option>
+              <option value="+971">+971 (UAE)</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">WhatsApp Number (10 digits) *</label>
+            <input class="input" type="text" name="whatsapp_10" required inputmode="numeric"
+                   maxlength="10" pattern="^\d{10}$"
+                   placeholder="e.g. 8012345678">
+            <div class="muted" style="margin-top:6px; font-weight:800;">
+              Enter only the 10 digits (no spaces). Country code is chosen separately.
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:none; border-top:1px solid var(--border); margin:18px 0;">
+
+        <div id="dynamicQuestions"></div>
+
+        <div class="actions-row">
+          <button class="btn" type="submit">Submit RSVP</button>
+        </div>
+      </form>
+    {% endif %}
+
+    {% if is_admin %}
+      <div style="margin-top:16px;">
+        <div id="builderList" style="display:grid; gap:14px;"></div>
+
+        <div class="actions-row" style="margin-top:18px;">
+          <button class="btn btn-outline" type="button" id="addQuestionBtn">+ Add Question</button>
+        </div>
+
+        <div class="admin-box" style="margin-top:16px;">
+          <form method="POST" action="{{ url_for('toggle_section', slug=event.slug, section_key=section_key) }}">
+            <button class="btn btn-outline" type="submit">
+              {% if section.visible %}Hide RSVP{% else %}Show RSVP{% endif %}
+            </button>
+          </form>
+        </div>
+
+        <p class="muted" id="autosaveStatus" style="margin:12px 2px 0; font-weight:900;"></p>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- RIGHT: Preview -->
+  <div class="section-card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div class="muted" style="font-weight:900;">Preview</div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline" type="button" id="btnDesk">Desktop</button>
+        <button class="btn btn-outline" type="button" id="btnPhone">Phone</button>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div id="previewDesk" style="display:block;">
+        <div style="border:1px solid var(--border); border-radius:18px; overflow:hidden; background:rgba(255,255,255,0.02);">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; min-height:420px;">
+            <div style="background:#0b0b0b; position:relative;">
+              {% if sections.get('home') and sections.get('home').image %}
+                <img src="{{ url_for('static', filename='uploads/' + sections.get('home').image) }}"
+                     alt="Event image"
+                     style="width:100%; height:100%; object-fit:cover; display:block;">
+              {% elif event.cover_image %}
+                <img src="{{ url_for('static', filename='uploads/' + event.cover_image) }}"
+                     alt="Event cover"
+                     style="width:100%; height:100%; object-fit:cover; display:block;">
+              {% else %}
+                <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                  Event Photo
+                </div>
+              {% endif %}
+              <div style="position:absolute; left:0; right:0; bottom:0; padding:16px; background:linear-gradient(180deg, transparent, rgba(0,0,0,0.85));">
+                <div style="font-weight:900; color:var(--accent); font-size:1.15rem;">{{ event.name }}</div>
+              </div>
+            </div>
+
+            <div style="padding:18px; max-height:420px; overflow:auto;">
+              <h3 style="margin:0 0 12px; color:var(--accent);">RSVP</h3>
+              <div id="previewContentDesk"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="previewPhone" style="display:none;">
+        <div style="max-width:360px; margin:0 auto; border:1px solid var(--border); border-radius:24px; overflow:hidden;">
+          <div style="background:#0b0b0b;">
+            {% if sections.get('home') and sections.get('home').image %}
+              <img src="{{ url_for('static', filename='uploads/' + sections.get('home').image) }}"
+                   alt="Event image"
+                   style="width:100%; height:260px; object-fit:cover; display:block;">
+            {% elif event.cover_image %}
+              <img src="{{ url_for('static', filename='uploads/' + event.cover_image) }}"
+                   alt="Event cover"
+                   style="width:100%; height:260px; object-fit:cover; display:block;">
+            {% else %}
+              <div style="height:260px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                Event Photo
+              </div>
+            {% endif %}
+          </div>
+
+          <div style="padding:16px; background:rgba(255,255,255,0.02); max-height:420px; overflow:auto;">
+            <h3 style="margin:0 0 12px; color:var(--accent);">RSVP</h3>
+            <div id="previewContentPhone"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  const btnDesk = document.getElementById("btnDesk");
+  const btnPhone = document.getElementById("btnPhone");
+  const prevDeskWrap = document.getElementById("previewDesk");
+  const prevPhoneWrap = document.getElementById("previewPhone");
+
+  btnDesk.classList.add("active");
+  btnDesk.addEventListener("click", ()=>{
+    prevDeskWrap.style.display = "block";
+    prevPhoneWrap.style.display = "none";
+  });
+  btnPhone.addEventListener("click", ()=>{
+    prevDeskWrap.style.display = "none";
+    prevPhoneWrap.style.display = "block";
+  });
+
+  function escapeHtml(s){
+    return (s || "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  const published = {{ rsvp_flow_published_json|safe }};
+  {% if is_admin %}
+  let draft;
+  try{
+    draft = JSON.parse({{ rsvp_flow_draft_json|tojson }});
+  }catch(e){
+    draft = published || [];
+  }
+  {% else %}
+  const draft = null;
+  {% endif %}
+
+  const flow = ({% if is_admin %} (draft && draft.length ? draft : (published || [])) {% else %} (published || []) {% endif %});
+
+  const prevDesk = document.getElementById("previewContentDesk");
+  const prevPhone = document.getElementById("previewContentPhone");
+
+  function flowSummaryHTML(items){
+    if (!items || !items.length) return `<p class="muted">No RSVP questions yet.</p>`;
+    return items.map((q, idx) => {
+      let meta = q.type;
+      if (q.type === "radio" || q.type === "select") meta += ` • ${q.options?.length || 0} options`;
+      return `
+        <div class="admin-box" style="margin:0 0 12px;">
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <div style="font-weight:900; color:var(--accent);">Question ${idx+1}: ${escapeHtml(q.label)}</div>
+            <div class="muted" style="font-weight:900;">${escapeHtml(meta)} ${q.required ? "• required" : ""}</div>
+          </div>
+          ${q.type === "radio" || q.type === "select"
+            ? `<div style="margin-top:8px; color:#eaeaea; line-height:1.7;">
+                ${(q.options||[]).map(o=>`<div>• ${escapeHtml(o.label)} <span class="muted">(${escapeHtml(o.value)})</span></div>`).join("")}
+               </div>`
+            : `<div class="muted" style="margin-top:8px;">(Free text response)</div>`
+          }
+          ${q.next_map && Object.keys(q.next_map).length
+            ? `<div class="muted" style="margin-top:10px; font-weight:900;">Branching:</div>
+               <div style="margin-top:6px; color:#eaeaea;">
+                 ${Object.entries(q.next_map).map(([k,v])=>`<div>if <span class="accent">${escapeHtml(k)}</span> → Question <span class="accent">${escapeHtml(String(v))}</span></div>`).join("")}
+               </div>`
+            : ""
+          }
+        </div>
+      `;
+    }).join("");
+  }
+
+  prevDesk.innerHTML = flowSummaryHTML(flow);
+  prevPhone.innerHTML = flowSummaryHTML(flow);
+
+  // Guest dynamic questions render (q_1, q_2...)
+  const dynWrap = document.getElementById("dynamicQuestions");
+  if (dynWrap){
+    function renderPath(){
+      dynWrap.innerHTML = "";
+      if (!flow.length) return;
+
+      let idx = 1; // 1-based
+      const visited = new Set();
+
+      while(idx >= 1 && idx <= flow.length && !visited.has(idx)){
+        visited.add(idx);
+        const q = flow[idx - 1];
+        const fieldName = `q_${idx}`;
+
+        let fieldHtml = "";
+        if (q.type === "radio"){
+          fieldHtml = `
+            <div style="display:grid; gap:8px;">
+              ${(q.options||[]).map(o => `
+                <label class="admin-box" style="margin:0; display:flex; align-items:center; gap:10px;">
+                  <input type="radio" name="${fieldName}" value="${escapeHtml(o.value)}" ${q.required ? "required" : ""}>
+                  <span style="font-weight:900;">${escapeHtml(o.label)}</span>
+                </label>
+              `).join("")}
+            </div>
+          `;
+        } else if (q.type === "select"){
+          fieldHtml = `
+            <select class="input" name="${fieldName}" ${q.required ? "required" : ""}>
+              <option value="">Select...</option>
+              ${(q.options||[]).map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("")}
+            </select>
+          `;
+        } else {
+          fieldHtml = `<textarea class="input textarea" name="${fieldName}" ${q.required ? "required" : ""} placeholder="Type here..."></textarea>`;
+        }
+
+        const block = document.createElement("div");
+        block.className = "admin-box";
+        block.style.margin = "0 0 12px";
+        block.innerHTML = `
+          <div style="font-weight:900; color:var(--accent); margin-bottom:8px;">
+            Question ${idx}: ${escapeHtml(q.label)} ${q.required ? '<span class="muted">(required)</span>' : ''}
+          </div>
+          ${fieldHtml}
+        `;
+        dynWrap.appendChild(block);
+
+        // determine next
+        let nextIdx = null;
+        if (q.next_map && typeof q.next_map === "object" && Object.keys(q.next_map).length){
+          const chosen =
+            dynWrap.querySelector(`[name="${fieldName}"]:checked`)?.value ||
+            dynWrap.querySelector(`[name="${fieldName}"]`)?.value ||
+            "";
+          nextIdx = q.next_map[chosen];
+          nextIdx = Number.isFinite(Number(nextIdx)) ? Number(nextIdx) : null;
+        }
+
+        if (!nextIdx) break;
+        idx = nextIdx;
+      }
+
+      dynWrap.querySelectorAll("input, select, textarea").forEach(el=>{
+        el.addEventListener("input", ()=>{
+          if (el.tagName === "SELECT" || el.type === "radio") renderPath();
+        });
+        el.addEventListener("change", ()=>{
+          if (el.tagName === "SELECT" || el.type === "radio") renderPath();
+        });
+      });
+    }
+
+    renderPath();
+  }
+
+  // Admin builder (no ID)
+  {% if is_admin %}
+  const listEl = document.getElementById("builderList");
+  const addBtn = document.getElementById("addQuestionBtn");
+  const statusEl = document.getElementById("autosaveStatus");
+
+  function setStatus(msg){ statusEl.textContent = msg || ""; }
+
+  function parseOptions(text){
+    const lines = (text||"").split("\n").map(x=>x.trim()).filter(Boolean);
+    const out = [];
+    for(const line of lines){
+      const parts = line.split("|");
+      if (parts.length >= 2){
+        const v = parts[0].trim();
+        const l = parts.slice(1).join("|").trim();
+        if (v && l) out.push({value:v, label:l});
+      }
+    }
+    return out;
+  }
+
+  function parseNext(text){
+    const lines = (text||"").split("\n").map(x=>x.trim()).filter(Boolean);
+    const out = {};
+    for(const line of lines){
+      const parts = line.split("->");
+      if (parts.length >= 2){
+        const k = parts[0].trim();
+        const v = parts.slice(1).join("->").trim();
+        if (k && v && String(parseInt(v,10)) === v){
+          out[k] = parseInt(v,10);
+        }
+      }
+    }
+    return out;
+  }
+
+  function renderBuilder(){
+    listEl.innerHTML = "";
+
+    flow.forEach((q, idx) => {
+      const wrap = document.createElement("div");
+      wrap.className = "admin-box";
+      wrap.style.margin = "0";
+
+      wrap.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div class="muted" style="font-weight:900;">Question ${idx+1}</div>
+          <button class="btn btn-outline" type="button" data-del="${idx}">Remove</button>
+        </div>
+
+        <div style="margin-top:12px; display:grid; gap:10px;">
+          <label class="label">Label</label>
+          <input class="input" type="text" data-label="${idx}" value="${escapeHtml(q.label || "")}" placeholder="Question text">
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+            <div>
+              <label class="label">Type</label>
+              <select class="input" data-type="${idx}">
+                <option value="radio" ${q.type==="radio"?"selected":""}>radio</option>
+                <option value="select" ${q.type==="select"?"selected":""}>select</option>
+                <option value="textarea" ${q.type==="textarea"?"selected":""}>textarea</option>
+              </select>
+            </div>
+            <div>
+              <label class="label">Required</label>
+              <select class="input" data-req="${idx}">
+                <option value="true" ${q.required ? "selected":""}>true</option>
+                <option value="false" ${!q.required ? "selected":""}>false</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="label">Options (radio/select)</label>
+            <div class="muted" style="margin-top:6px; font-weight:800;">
+              Format: value|label per line. Example: yes|Yes
+            </div>
+            <textarea class="input textarea" data-opts="${idx}" placeholder="yes|Yes&#10;no|No">${(q.options||[]).map(o=>`${o.value}|${o.label}`).join("\n")}</textarea>
+          </div>
+
+          <div>
+            <label class="label">Branching / Next</label>
+            <div class="muted" style="margin-top:6px; font-weight:800;">
+              Format: answerValue -> questionNumber. Example: yes->2
+            </div>
+            <textarea class="input textarea" data-next="${idx}" placeholder="yes->2&#10;no->3">${Object.entries(q.next_map||{}).map(([k,v])=>`${k}->${v}`).join("\n")}</textarea>
+          </div>
+        </div>
+      `;
+
+      listEl.appendChild(wrap);
+    });
+
+    listEl.querySelectorAll("[data-del]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const i = Number(btn.getAttribute("data-del"));
+        flow.splice(i, 1);
+        renderBuilder();
+        refreshPreviewAndSave();
+      });
+    });
+
+    listEl.querySelectorAll("input[data-label], select[data-type], select[data-req], textarea[data-opts], textarea[data-next]").forEach(el=>{
+      el.addEventListener("input", ()=>{
+        const idx = Number(el.getAttribute("data-label") || el.getAttribute("data-type") ||
+                           el.getAttribute("data-req") || el.getAttribute("data-opts") || el.getAttribute("data-next"));
+        const q = flow[idx];
+        if (!q) return;
+
+        if (el.hasAttribute("data-label")) q.label = el.value;
+        if (el.hasAttribute("data-type")) q.type = el.value;
+        if (el.hasAttribute("data-req")) q.required = (el.value === "true");
+        if (el.hasAttribute("data-opts")) q.options = parseOptions(el.value);
+        if (el.hasAttribute("data-next")) q.next_map = parseNext(el.value);
+
+        refreshPreviewAndSave();
+      });
+    });
+  }
+
+  let timer = null;
+  let lastSent = "";
+  let inflight = false;
+
+  async function sendDraft(payload){
+    if (inflight) return;
+    inflight = true;
+    try{
+      setStatus("Saving draft...");
+      const resp = await fetch("{{ url_for('rsvp_flow_save_draft', slug=event.slug) }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ draft_json: payload }).toString()
+      });
+      setStatus(resp.ok ? "Draft saved." : "Draft save failed.");
+    }catch(e){
+      setStatus("Draft save failed.");
+    }finally{
+      inflight = false;
+    }
+  }
+
+  function scheduleSave(){
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(()=>{
+      const payload = JSON.stringify(flow.map(q=>({
+        type:q.type||"textarea",
+        label:q.label||"",
+        required:!!q.required,
+        options:Array.isArray(q.options)?q.options:[],
+        next_map:(q.next_map && typeof q.next_map==="object")?q.next_map:{}
+      })));
+      if (payload !== lastSent){
+        lastSent = payload;
+        sendDraft(payload);
+      }
+    }, 700);
+  }
+
+  function refreshPreviewAndSave(){
+    prevDesk.innerHTML = flowSummaryHTML(flow);
+    prevPhone.innerHTML = flowSummaryHTML(flow);
+    scheduleSave();
+  }
+
+  addBtn.addEventListener("click", ()=>{
+    flow.push({
+      type: "textarea",
+      label: "New question",
+      required: false,
+      options: [],
+      next_map: {}
+    });
+    renderBuilder();
+    refreshPreviewAndSave();
+  });
+
+  if (!flow.length){
+    flow.push({
+      type:"radio",
+      label:"Will you be attending?",
+      required:true,
+      options:[{value:"yes",label:"Yes"},{value:"no",label:"No"}],
+      next_map:{yes:2,no:3}
+    });
+  }
+
+  renderBuilder();
+  setStatus("");
+  {% endif %}
+})();
+</script>
+
+{% endblock %}

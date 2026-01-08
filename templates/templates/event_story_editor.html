@@ -1,0 +1,270 @@
+{% extends "event_base.html" %}
+{% block event_content %}
+
+{% set use_draft = (draft_preview and can_manage) %}
+
+<!-- ===== FONTS FOR RICH TEXT EDITOR ===== -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?
+family=Inter:wght@400;600;800&
+family=Manrope:wght@400;600;800&
+family=Domine:wght@400;600;700&
+family=Barlow:wght@400;600;700&
+family=Chakra+Petch:wght@400;600;700&
+family=Unbounded:wght@400;600;800&
+family=Public+Sans:wght@400;600;800&
+family=Space+Grotesk:wght@400;600;700&
+family=Archivo:wght@400;600;800&
+family=EB+Garamond:wght@400;600;700&
+family=Caprasimo&
+family=Epilogue:wght@400;600;800
+&display=swap" rel="stylesheet">
+
+<link href="https://fonts.cdnfonts.com/css/satoshi" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/instrument-serif" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/cabinet-grotesk" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/zodiak" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/melodrama" rel="stylesheet">
+
+{% if is_admin %}
+
+<div class="admin-editor-grid">
+
+
+  <!-- LEFT: Editor -->
+  <div class="section-card">
+
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div>
+        <h2 class="accent" style="margin:0;">Story</h2>
+        <p class="muted" style="margin:6px 0 0;">
+          Format text (fonts, headings, bold, lists, links). Preview updates instantly.
+          Guests only see it after you click <strong>Save</strong>.
+        </p>
+      </div>
+
+      <form method="POST" action="{{ url_for('story_publish', slug=event.slug) }}">
+        <button class="btn" type="submit">Save</button>
+      </form>
+    </div>
+
+    <link href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css" rel="stylesheet">
+
+    <div class="admin-box" style="margin-top:14px; padding:0;">
+      <div id="storyEditor" style="height:560px;"></div>
+    </div>
+
+    <div class="admin-box" style="margin-top:14px;">
+      <form method="POST" action="{{ url_for('toggle_section', slug=event.slug, section_key=section_key) }}">
+        <button class="btn btn-outline" type="submit">
+          {% if section.visible %}Hide Story{% else %}Show Story{% endif %}
+        </button>
+      </form>
+    </div>
+
+    <p class="muted" id="autosaveStatus" style="margin:12px 2px 0; font-weight:900;"></p>
+
+    <script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+  </div>
+
+  <!-- RIGHT: Preview -->
+  <div class="section-card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div class="muted" style="font-weight:900;">Preview</div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline" type="button" id="btnDesk">Desktop</button>
+        <button class="btn btn-outline" type="button" id="btnPhone">Phone</button>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <!-- Desktop -->
+      <div id="previewDesk" style="display:block;">
+        <div style="border:1px solid var(--border); border-radius:18px; overflow:hidden; background:rgba(255,255,255,0.02);">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; min-height:420px;">
+            <div style="background:#0b0b0b; position:relative;">
+              {% if sections.get('home') and sections.get('home').image %}
+                <img src="{{ url_for('static', filename='uploads/' + sections.get('home').image) }}"
+                     alt="Event image"
+                     style="width:100%; height:100%; object-fit:cover; display:block;">
+              {% else %}
+                <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                  Event Photo
+                </div>
+              {% endif %}
+              <div style="position:absolute; left:0; right:0; bottom:0; padding:16px; background:linear-gradient(180deg, transparent, rgba(0,0,0,0.85));">
+                <div style="font-weight:900; color:var(--accent); font-size:1.15rem;">{{ event.name }}</div>
+              </div>
+            </div>
+
+            <div style="padding:18px; max-height:420px; overflow:auto;">
+              <h3 style="margin:0 0 12px; color:var(--accent);">Story</h3>
+              <div class="ql-editor story-public" id="previewContentDesk" style="padding:0; overflow:visible; max-height:none; height:auto; overflow-x:hidden; word-break:break-word; overflow-wrap:anywhere;">
+                {{ (story_draft if use_draft else story_published)|safe }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phone -->
+      <div id="previewPhone" style="display:none;">
+        <div style="max-width:360px; margin:0 auto; border:1px solid var(--border); border-radius:24px; overflow:hidden;">
+          <div style="background:#0b0b0b;">
+            {% if sections.get('home') and sections.get('home').image %}
+              <img src="{{ url_for('static', filename='uploads/' + sections.get('home').image) }}"
+                   alt="Event image"
+                   style="width:100%; height:260px; object-fit:cover; display:block;">
+            {% else %}
+              <div style="height:260px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                Event Photo
+              </div>
+            {% endif %}
+          </div>
+
+          <div style="padding:16px; background:rgba(255,255,255,0.02); max-height:420px; overflow:auto;">
+            <h3 style="margin:0 0 12px; color:var(--accent);">Story</h3>
+            <div class="ql-editor story-public" id="previewContentPhone" style="padding:0; overflow:visible; max-height:none; height:auto; overflow-x:hidden; word-break:break-word; overflow-wrap:anywhere;">
+              {{ (story_draft if use_draft else story_published)|safe }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const btnDesk = document.getElementById("btnDesk");
+  const btnPhone = document.getElementById("btnPhone");
+  const prevDeskWrap = document.getElementById("previewDesk");
+  const prevPhoneWrap = document.getElementById("previewPhone");
+
+  btnDesk.addEventListener("click", ()=>{
+    prevDeskWrap.style.display = "block";
+    prevPhoneWrap.style.display = "none";
+  });
+  btnPhone.addEventListener("click", ()=>{
+    prevDeskWrap.style.display = "none";
+    prevPhoneWrap.style.display = "block";
+  });
+})();
+</script>
+
+<script>
+(function(){
+  const Font = Quill.import('formats/font');
+
+  Font.whitelist = [
+    'inter','satoshi','manrope','ribes','aspekta','domine','ojuju','instrument-serif',
+    'barlow','chakra-petch','unbounded','tanker','public-sans','ortica','space-grotesk',
+    'cabinet-grotesk','pencerio','stardom','zodiak','melodrama','archivo','eb-garamond',
+    'caprasimo','gambarino','epilogue','serif','monospace'
+  ];
+
+  Quill.register(Font, true);
+
+  const quill = new Quill('#storyEditor', {
+    theme: 'snow',
+    modules: {
+      toolbar: [
+        [{ 'font': Font.whitelist }],
+        [{ 'header': [1, 2, 3, false] }],
+        ['bold', 'italic', 'underline'],
+        [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+        ['link'],
+        ['clean']
+      ]
+    }
+  });
+
+  const initialHtml = `{{ (story_draft if use_draft else story_published)|safe }}`;
+  quill.root.innerHTML = initialHtml || "";
+
+  const desk = document.getElementById("previewContentDesk");
+  const phone = document.getElementById("previewContentPhone");
+  const statusEl = document.getElementById("autosaveStatus");
+  function setStatus(msg){ statusEl.textContent = msg || ""; }
+
+  let timer = null;
+  let lastSent = "";
+  let inflight = false;
+
+  async function sendDraft(html){
+    if (inflight) return;
+    inflight = true;
+    try{
+      setStatus("Saving draft...");
+      const resp = await fetch("{{ url_for('story_save_draft', slug=event.slug) }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ draft_html: html }).toString()
+      });
+      setStatus(resp.ok ? "Draft saved." : "Draft save failed.");
+    } catch(e){
+      setStatus("Draft save failed.");
+    } finally {
+      inflight = false;
+    }
+  }
+
+  function schedule(){
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(()=>{
+      const html = quill.root.innerHTML || "";
+      desk.innerHTML = html;
+      phone.innerHTML = html;
+
+      if (html !== lastSent){
+        lastSent = html;
+        sendDraft(html);
+      }
+    }, 700);
+  }
+
+  quill.on("text-change", schedule);
+  setStatus("");
+})();
+</script>
+
+{% else %}
+
+<!-- NORMAL USERS: match the Preview layout (without the Desktop/Phone framing controls) -->
+
+<div class="section-card" style="padding:0;">
+  <div class="public-story-wrap">
+    <div class="public-story-grid">
+      <div class="public-story-left">
+        {% if sections.get('home') and sections.get('home').image %}
+          <img src="{{ url_for('static', filename='uploads/' + sections.get('home').image) }}"
+               alt="Event image">
+        {% else %}
+          <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+            Event Photo
+          </div>
+        {% endif %}
+        <div class="public-story-badge">
+          <div class="event-name">{{ event.name }}</div>
+        </div>
+      </div>
+
+      <div class="public-story-right">
+        <h2 class="story-title">Story</h2>
+        <div class="public-story-content">
+          <div class="ql-editor story-public">
+            {{ story_published|safe }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
