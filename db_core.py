@@ -41,9 +41,11 @@ def row_get(row, key, default=None):
     if row is None:
         return default
     if isinstance(row, dict):
-        return row.get(key, default)
+        v = row.get(key, default)
+        return default if v is None else v
     try:
-        return row[key]
+        v = row[key]
+        return default if v is None else v
     except Exception:
         return default
 
@@ -61,7 +63,7 @@ class DB:
 
     It auto-converts:
       - SQLite placeholders '?' -> Postgres '%s'
-      - SQLite INSERT OR IGNORE -> Postgres ON CONFLICT DO NOTHING (when possible)
+      - SQLite INSERT OR IGNORE -> Postgres ON CONFLICT DO NOTHING
     """
 
     def __init__(self, kind: str, conn):
@@ -76,14 +78,10 @@ class DB:
         sql = sql.replace("?", "%s")
 
         # 2) Convert INSERT OR IGNORE to ON CONFLICT DO NOTHING
-        # We only do this when the query is exactly INSERT OR IGNORE INTO <table> (...)
-        # because Postgres doesn't support OR IGNORE.
         if "INSERT OR IGNORE INTO" in sql:
-            # Convert to normal INSERT INTO ...
             sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
-
-            # Add a generic ON CONFLICT DO NOTHING at the end (works if table has a constraint)
             sql = sql.strip().rstrip(";")
+            # generic conflict handler (works if table has any UNIQUE/PK constraint that matches)
             sql += " ON CONFLICT DO NOTHING"
 
         return sql
@@ -168,14 +166,9 @@ def get_table_columns(db: DB, table_name: str) -> set[str]:
 
 
 # ----------------------------
-# Schema creation (matches your REAL imported schema)
+# Schema creation
 # ----------------------------
 def _create_schema_sqlite(db: DB):
-    """
-    This matches the schema you showed from your SQLite dump:
-    users, events, sections, rsvp_questions, rsvp_responses,
-    event_photos, photos_day_settings, password_reset_otps.
-    """
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -333,10 +326,6 @@ def _create_schema_sqlite(db: DB):
 
 
 def _create_schema_postgres(db: DB):
-    """
-    Same schema as SQLite, but Postgres-friendly.
-    Uses IF NOT EXISTS so it won't break if you imported already.
-    """
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -522,7 +511,6 @@ def ensure_default_admin():
     default_email = os.getenv("DEFAULT_ADMIN_EMAIL", "dehindeaba@gmail.com")
     default_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "Admin1234")
 
-    # already exists?
     cur = db.execute("SELECT id FROM users WHERE email=?", (default_email,))
     row = cur.fetchone()
     if row:
@@ -531,7 +519,6 @@ def ensure_default_admin():
     pwd_hash = generate_password_hash(default_password)
     cols = get_table_columns(db, "users")
 
-    # NEW/REAL schema (from your dump)
     if "is_verified" in cols and "failed_login_attempts" in cols:
         db.execute(
             """
@@ -555,7 +542,6 @@ def ensure_default_admin():
             ),
         )
     else:
-        # Older/simpler schema fallback
         db.execute(
             "INSERT INTO users (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
             (default_email, pwd_hash, "admin", now_iso()),
@@ -565,56 +551,63 @@ def ensure_default_admin():
 
 
 # ----------------------------
-# Default sections
+# Default sections (IMPORTANT FIX)
 # ----------------------------
+DEFAULT_SECTIONS = [
+    # key, title, sort_order, initial_content
+    ("home", "Home", 10, ""),
+    ("story", "Our Story", 20, ""),
+    ("meet-couple", "Meet the Couple", 30, ""),
+    ("proposal", "The Proposal", 40, ""),
+    ("tidbits", "Tidbits", 50, "[]"),  # JSON list
+    ("qa", "Q&A", 60, "[]"),          # JSON list
+    ("rsvp", "RSVP", 70, ""),
+    ("photos", "Photos", 80, ""),
+    ("photos-day", "Photos of the Day", 90, ""),
+]
+
+
 def ensure_default_sections(event_id: int):
     """
     Inserts default sections IF they are missing.
-    Works with both:
-      - Real schema: title/visible/content/draft_content/image/sort_order
-      - Old schema: section_title/section_content/created_at
+
+    Fixes your issue where "sections" ended up empty (or missing expected keys like story),
+    causing public/mobile views and editors to behave inconsistently.
     """
     db = get_db()
     cols = get_table_columns(db, "sections")
 
-    defaults = [
-        ("agenda", "Agenda", ""),
-        ("speakers", "Speakers", ""),
-        ("notes", "Notes", ""),
-    ]
-
     # Real schema
-    if "title" in cols and "content" in cols:
-        # best effort: include visible/draft_content/image/sort_order if present
-        for i, (key, title, content) in enumerate(defaults, start=1):
+    if "title" in cols and "content" in cols and "section_key" in cols:
+        for (key, title, sort_order, initial_content) in DEFAULT_SECTIONS:
             visible = 1
-            draft_content = ""
+            content = initial_content
+            draft_content = initial_content  # keep draft/content aligned initially
             image = ""
-            sort_order = 1000 + i * 10
 
-            # Use INSERT OR IGNORE for SQLite; auto converts for Postgres adapter.
             db.execute(
                 "INSERT OR IGNORE INTO sections "
                 "(event_id, section_key, title, visible, content, draft_content, image, sort_order) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (event_id, key, title, visible, content, draft_content, image, sort_order),
+                (int(event_id), key, title, visible, content, draft_content, image, int(sort_order)),
             )
+
         db.commit()
         return
 
-    # Old schema fallback
-    for key, title, content in defaults:
+    # Old schema fallback (very old versions)
+    for (key, title, _, initial_content) in DEFAULT_SECTIONS:
         if "created_at" in cols:
             db.execute(
                 "INSERT OR IGNORE INTO sections (event_id, section_key, section_title, section_content, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (event_id, key, title, content, now_iso()),
+                (int(event_id), key, title, initial_content, now_iso()),
             )
         else:
             db.execute(
                 "INSERT OR IGNORE INTO sections (event_id, section_key, section_title, section_content) "
                 "VALUES (?, ?, ?, ?)",
-                (event_id, key, title, content),
+                (int(event_id), key, title, initial_content),
             )
     db.commit()
 
