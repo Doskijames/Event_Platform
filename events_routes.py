@@ -1,50 +1,69 @@
+# events_routes.py (FULL - corrected: Drive URL storage + media_url helper + add_section sort fix + delete event)
 import os
 import secrets
 from datetime import datetime, timezone, datetime as dt_cls
-from functools import wraps
 
 from flask import (
     render_template, request, redirect, url_for,
     session, flash, abort, current_app
 )
 from werkzeug.utils import secure_filename
-from gdrive_storage import drive_enabled, upload_file_to_drive
+
+# --- Google Drive integration (supports BOTH env styles: GOOGLE_* and GDRIVE_*) ---
+try:
+    from gdrive_storage import drive_enabled, upload_filestorage_to_drive
+except Exception:
+    drive_enabled = None
+    upload_filestorage_to_drive = None
 
 from db_core import get_db, ensure_default_sections
 from utils_core import (
     slugify, unique_slug, sanitize_quill_html,
-    parse_qa_list_json, has_event_access, event_session_key
+    parse_qa_list_json, event_session_key
 )
 from auth_routes import current_user, login_required
 
+
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
+
+# -----------------------------
+# Helpers
+# -----------------------------
 def allowed_file(filename: str) -> bool:
     if "." not in filename:
         return False
     ext = filename.rsplit(".", 1)[1].lower()
     return ext in ALLOWED_EXTENSIONS
 
+
 def get_event_by_slug(slug: str):
     return get_db().execute("SELECT * FROM events WHERE slug=?", (slug,)).fetchone()
 
+
 def get_event_sections(event_id: int):
-    rows = get_db().execute("SELECT * FROM sections WHERE event_id=? ORDER BY sort_order ASC, id ASC", (event_id,)).fetchall()
+    rows = get_db().execute(
+        "SELECT * FROM sections WHERE event_id=? ORDER BY sort_order ASC, id ASC",
+        (event_id,)
+    ).fetchall()
+    # Works for sqlite Row and postgres dict rows
     return {r["section_key"]: r for r in rows}
+
 
 def can_manage_event(event_row) -> bool:
     u = current_user()
     if not u:
         return False
-    if (u["role"] or "").lower() == "admin":
+    if (u.get("role") or u["role"] or "").lower() == "admin":
         return True
-    if event_row["owner_user_id"] and int(event_row["owner_user_id"]) == int(u["id"]):
+    if event_row.get("owner_user_id") and int(event_row["owner_user_id"]) == int(u["id"]):
         return True
     return False
 
 
 def has_event_view_access(event_row) -> bool:
-    """Enforce passcode access for event viewing.
+    """
+    Enforce passcode access for event viewing.
 
     Rules:
     - Owner/admin can always view.
@@ -54,15 +73,13 @@ def has_event_view_access(event_row) -> bool:
     if not event_row:
         return False
 
-    # Owner/admin always allowed
     if can_manage_event(event_row):
         return True
 
-    passcode = (event_row["passcode"] or "").strip()
+    passcode = (event_row.get("passcode") or "").strip()
     if not passcode:
         return True
 
-    # Session unlock keyed by event id (stable)
     return bool(session.get(event_session_key(event_row["id"])))
 
 
@@ -76,25 +93,23 @@ def parse_date_iso(date_iso: str):
     except ValueError:
         return None
 
+
 def format_weekday(d: dt_cls) -> str:
     return d.strftime("%A")
+
 
 def format_long_date(d: dt_cls) -> str:
     return d.strftime("%B %d, %Y")
 
+
 def countdown_target_iso(d: dt_cls) -> str:
     return d.strftime("%Y-%m-%dT00:00:00")
 
-def unique_custom_section_key(event_id: int, title: str, prefix: str) -> str:
-    """Create a unique section_key for an event.
 
-    Option B design: custom sections are identified by prefixes:
-      - custom-text-*
-      - custom-qa-*
-    """
-    base = slugify(title)
-    base = base[:40]  # keep keys readable and short
+def unique_custom_section_key(event_id: int, title: str, prefix: str) -> str:
+    base = slugify(title)[:40]
     key = f"{prefix}{base}"
+
     db = get_db()
     if not db.execute(
         "SELECT 1 FROM sections WHERE event_id=? AND section_key=? LIMIT 1",
@@ -112,6 +127,101 @@ def unique_custom_section_key(event_id: int, title: str, prefix: str) -> str:
 
     return f"{key}-{secrets.token_hex(3)}"
 
+
+def _is_url(s: str) -> bool:
+    s = (s or "").strip().lower()
+    return s.startswith("http://") or s.startswith("https://")
+
+
+def _drive_image_url(file_id: str) -> str:
+    # Best for <img src="..."> embedding
+    return f"https://drive.google.com/uc?export=view&id={file_id}"
+
+
+def media_url(stored_value: str):
+    """
+    If stored_value is already a URL (Drive), return it.
+    Else treat it as a local filename under /static/uploads/.
+    """
+    v = (stored_value or "").strip()
+    if not v:
+        return ""
+    if _is_url(v):
+        return v
+    return url_for("static", filename=f"uploads/{v}")
+
+
+def _ensure_drive_env_aliases():
+    """
+    Your gdrive_storage.py expects:
+      GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
+      GOOGLE_DRIVE_FOLDER_ID
+
+    But you said Render env is set as:
+      GDRIVE_SERVICE_ACCOUNT_JSON
+      GDRIVE_FOLDER_ID
+
+    This maps GDRIVE_* -> GOOGLE_* at runtime so drive_enabled() works.
+    """
+    # Map service account JSON
+    if os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON") and not os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "")
+
+    if os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64") and not os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"):
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "")
+
+    # Map folder id
+    if os.getenv("GDRIVE_FOLDER_ID") and not os.getenv("GOOGLE_DRIVE_FOLDER_ID"):
+        os.environ["GOOGLE_DRIVE_FOLDER_ID"] = os.getenv("GDRIVE_FOLDER_ID", "")
+
+
+def _drive_ok() -> bool:
+    """
+    True if Drive uploader is available and env vars are present
+    (supports both GOOGLE_* and GDRIVE_* naming).
+    """
+    if upload_filestorage_to_drive is None:
+        return False
+
+    _ensure_drive_env_aliases()
+
+    # If gdrive_storage exposes drive_enabled, use it; else do a simple check.
+    if callable(drive_enabled):
+        try:
+            return bool(drive_enabled())
+        except Exception:
+            return False
+
+    has_creds = bool(
+        os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
+    )
+    has_folder = bool(os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip())
+    return has_creds and has_folder
+
+
+def _next_sort_order(event_id: int) -> int:
+    """
+    Determine next sort_order for a newly added section.
+    """
+    db = get_db()
+    row = db.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) AS m FROM sections WHERE event_id=?",
+        (event_id,)
+    ).fetchone()
+    try:
+        m = int(row["m"] if isinstance(row, dict) else row[0])
+    except Exception:
+        try:
+            m = int(row["m"])
+        except Exception:
+            m = 0
+    return m + 10
+
+
+# -----------------------------
+# Routes
+# -----------------------------
 def register_event_routes(app):
 
     @app.route("/events")
@@ -141,10 +251,13 @@ def register_event_routes(app):
 
             db = get_db()
             now = datetime.now(timezone.utc).isoformat()
-            db.execute("""
+            db.execute(
+                """
                 INSERT INTO events(slug, name, date_iso, location, description, passcode, owner_user_id, cover_image, created_at)
                 VALUES (?,?,?,?,?,?,?,?,?)
-            """, (slug, name, date_iso, location, description, passcode, u["id"], "", now))
+                """,
+                (slug, name, date_iso, location, description, passcode, u["id"], "", now)
+            )
             db.commit()
 
             new_event = get_event_by_slug(slug)
@@ -170,7 +283,7 @@ def register_event_routes(app):
 
         if request.method == "POST":
             passcode = (request.form.get("passcode") or "").strip()
-            if passcode == event["passcode"]:
+            if passcode == (event.get("passcode") or event["passcode"]):
                 session[event_session_key(event["id"])] = True
                 return redirect(url_for("event_section", slug=slug, section_key="home"))
             flash("Incorrect passcode. Please try again.")
@@ -182,14 +295,11 @@ def register_event_routes(app):
         event = get_event_by_slug(slug)
         if event:
             session.pop(event_session_key(event["id"]), None)
-        # Backward-compatible cleanup (older builds stored by slug)
         session.pop(f"event_{slug}", None)
         return redirect(url_for("events"))
 
     # ============================
-    # ✅ DELETE EVENT (NEW)
-    # Admin can delete any event.
-    # Owner can delete only events they created.
+    # DELETE EVENT (Admin any, Owner own)
     # ============================
     @app.post("/events/<slug>/delete", endpoint="delete_event")
     @login_required
@@ -204,30 +314,29 @@ def register_event_routes(app):
         db = get_db()
         event_id = int(event["id"])
 
-        # Best-effort cleanup of child rows to avoid FK issues on Postgres/SQLite.
-        # (Safe even if some tables don't exist in a user's schema yet.)
+        # Best-effort cleanup of child rows (safe if a table doesn't exist)
         child_deletes = [
             ("DELETE FROM sections WHERE event_id=?", (event_id,)),
             ("DELETE FROM event_photos WHERE event_id=?", (event_id,)),
             ("DELETE FROM photos_day_settings WHERE event_id=?", (event_id,)),
             ("DELETE FROM rsvp_responses WHERE event_id=?", (event_id,)),
-            ("DELETE FROM rsvps WHERE event_id=?", (event_id,)),
+            ("DELETE FROM rsvps WHERE event_id=?", (event_id,)),  # legacy schema fallback
         ]
-
         for sql, params in child_deletes:
             try:
                 db.execute(sql, params)
             except Exception:
-                # If a table doesn't exist in the current schema, ignore it.
                 pass
 
-        # Finally delete the event itself
         db.execute("DELETE FROM events WHERE id=?", (event_id,))
         db.commit()
 
         flash("Event deleted successfully 🗑️")
         return redirect(url_for("events"))
 
+    # ============================
+    # Upload section image (Drive URL stored in DB)
+    # ============================
     @app.route("/events/<slug>/<section_key>/upload-image", methods=["POST"])
     @login_required
     def upload_section_image(slug, section_key):
@@ -241,6 +350,7 @@ def register_event_routes(app):
             return redirect(url_for("event_section", slug=slug, section_key=section_key))
 
         ensure_default_sections(event["id"])
+
         file = request.files.get("image")
         if not file or file.filename == "":
             flash("Please choose an image file.")
@@ -252,20 +362,37 @@ def register_event_routes(app):
 
         filename = secure_filename(file.filename)
         unique_name = f"{slug}-{section_key}-{secrets.token_hex(6)}-{filename}"
-        if drive_enabled():
-            unique_name = upload_file_to_drive(file, unique_name)
-        else:
+
+        stored_value = ""
+        if _drive_ok():
+            try:
+                res = upload_filestorage_to_drive(file, filename=unique_name, make_public=True)
+                file_id = (res or {}).get("file_id", "")
+                if file_id:
+                    stored_value = _drive_image_url(file_id)
+                else:
+                    # fallback: if wrapper returns a view_url/download_url only
+                    stored_value = (res or {}).get("download_url") or (res or {}).get("view_url") or ""
+            except Exception:
+                stored_value = ""
+
+        if not stored_value:
+            # local fallback (may disappear on Render redeploy)
             file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name))
+            stored_value = unique_name
 
         db = get_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE sections
             SET image=?
             WHERE event_id=? AND section_key=?
-        """, (unique_name, event["id"], section_key))
+            """,
+            (stored_value, event["id"], section_key)
+        )
 
         if section_key == "home":
-            db.execute("UPDATE events SET cover_image=? WHERE id=?", (unique_name, event["id"]))
+            db.execute("UPDATE events SET cover_image=? WHERE id=?", (stored_value, event["id"]))
 
         db.commit()
 
@@ -317,10 +444,13 @@ def register_event_routes(app):
         ensure_default_sections(event["id"])
 
         db = get_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='story'
-        """, (draft_html, event["id"]))
+            """,
+            (draft_html, event["id"])
+        )
         db.commit()
         return ("", 204)
 
@@ -343,12 +473,14 @@ def register_event_routes(app):
             (event["id"],)
         ).fetchone()
 
-        published = sec["draft_content"] or ""
-        # Keep draft_content in sync so draft public preview works after publish
-        db.execute("""
+        published = (sec["draft_content"] or "") if sec else ""
+        db.execute(
+            """
             UPDATE sections SET content=?, draft_content=?
             WHERE event_id=? AND section_key='story'
-        """, (published, published, event["id"]))
+            """,
+            (published, published, event["id"])
+        )
         db.commit()
 
         flash("Story published.")
@@ -367,11 +499,15 @@ def register_event_routes(app):
 
         draft_html = sanitize_quill_html(request.form.get("draft_html") or "")
         ensure_default_sections(event["id"])
+
         db = get_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='meet-couple'
-        """, (draft_html, event["id"]))
+            """,
+            (draft_html, event["id"])
+        )
         db.commit()
         return ("", 204)
 
@@ -394,11 +530,14 @@ def register_event_routes(app):
             (event["id"],)
         ).fetchone()
 
-        published = sec["draft_content"] or ""
-        db.execute("""
+        published = (sec["draft_content"] or "") if sec else ""
+        db.execute(
+            """
             UPDATE sections SET content=?, draft_content=?
             WHERE event_id=? AND section_key='meet-couple'
-        """, (published, published, event["id"]))
+            """,
+            (published, published, event["id"])
+        )
         db.commit()
 
         flash("Meet the Couple published.")
@@ -417,11 +556,15 @@ def register_event_routes(app):
 
         draft_html = sanitize_quill_html(request.form.get("draft_html") or "")
         ensure_default_sections(event["id"])
+
         db = get_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='proposal'
-        """, (draft_html, event["id"]))
+            """,
+            (draft_html, event["id"])
+        )
         db.commit()
         return ("", 204)
 
@@ -444,11 +587,14 @@ def register_event_routes(app):
             (event["id"],)
         ).fetchone()
 
-        published = sec["draft_content"] or ""
-        db.execute("""
+        published = (sec["draft_content"] or "") if sec else ""
+        db.execute(
+            """
             UPDATE sections SET content=?, draft_content=?
             WHERE event_id=? AND section_key='proposal'
-        """, (published, published, event["id"]))
+            """,
+            (published, published, event["id"])
+        )
         db.commit()
 
         flash("Proposal published.")
@@ -458,6 +604,7 @@ def register_event_routes(app):
     @login_required
     def tidbits_save_draft(slug):
         import json
+
         event = get_event_by_slug(slug)
         if not event:
             return ("Not found", 404)
@@ -484,10 +631,13 @@ def register_event_routes(app):
             return ("Bad Request", 400)
 
         db = get_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='tidbits'
-        """, (raw_json, event["id"]))
+            """,
+            (raw_json, event["id"])
+        )
         db.commit()
         return ("", 204)
 
@@ -495,6 +645,7 @@ def register_event_routes(app):
     @login_required
     def tidbits_publish(slug):
         import json
+
         event = get_event_by_slug(slug)
         if not event:
             return render_template("not_found.html", user=current_user()), 404
@@ -518,7 +669,7 @@ def register_event_routes(app):
             (event["id"],)
         ).fetchone()
 
-        payload_json = sec["draft_content"] or "[]"
+        payload_json = (sec["draft_content"] or "[]") if sec else "[]"
         if force_json:
             try:
                 parsed = json.loads(force_json)
@@ -533,9 +684,8 @@ def register_event_routes(app):
                             cleaned.append({"q": q, "a": a})
                 payload_json = json.dumps(cleaned, ensure_ascii=False)
             except Exception:
-                payload_json = sec["draft_content"] or "[]"
+                payload_json = (sec["draft_content"] or "[]") if sec else "[]"
 
-        # ✅ IMPORTANT FIX: keep draft_content in sync with content (do not clear)
         db.execute(
             "UPDATE sections SET content=?, draft_content=? WHERE event_id=? AND section_key='tidbits'",
             (payload_json, payload_json, event["id"])
@@ -549,6 +699,7 @@ def register_event_routes(app):
     @login_required
     def qa_save_draft(slug):
         import json
+
         event = get_event_by_slug(slug)
         if not event:
             return ("Not found", 404)
@@ -575,10 +726,13 @@ def register_event_routes(app):
             return ("Bad Request", 400)
 
         db = get_db()
-        db.execute("""
+        db.execute(
+            """
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='qa'
-        """, (raw_json, event["id"]))
+            """,
+            (raw_json, event["id"])
+        )
         db.commit()
         return ("", 204)
 
@@ -586,6 +740,7 @@ def register_event_routes(app):
     @login_required
     def qa_publish(slug):
         import json
+
         event = get_event_by_slug(slug)
         if not event:
             return render_template("not_found.html", user=current_user()), 404
@@ -609,7 +764,7 @@ def register_event_routes(app):
             (event["id"],)
         ).fetchone()
 
-        payload_json = sec["draft_content"] or "[]"
+        payload_json = (sec["draft_content"] or "[]") if sec else "[]"
         if force_json:
             try:
                 parsed = json.loads(force_json)
@@ -624,9 +779,8 @@ def register_event_routes(app):
                             cleaned.append({"q": q, "a": a})
                 payload_json = json.dumps(cleaned, ensure_ascii=False)
             except Exception:
-                payload_json = sec["draft_content"] or "[]"
+                payload_json = (sec["draft_content"] or "[]") if sec else "[]"
 
-        # ✅ IMPORTANT FIX: keep draft_content in sync with content (do not clear)
         db.execute(
             "UPDATE sections SET content=?, draft_content=? WHERE event_id=? AND section_key='qa'",
             (payload_json, payload_json, event["id"])
@@ -665,16 +819,17 @@ def register_event_routes(app):
 
             prefix = "custom-text-" if section_type == "free_text" else "custom-qa-"
             section_key = unique_custom_section_key(event["id"], name, prefix)
-
             initial_content = "" if section_type == "free_text" else "[]"
+
+            new_sort = _next_sort_order(event["id"])
 
             db = get_db()
             db.execute(
                 """
-                INSERT INTO sections(event_id, section_key, title, visible, content, draft_content, image)
-                VALUES (?,?,?,?,?,?,?)
+                INSERT INTO sections(event_id, section_key, title, visible, content, draft_content, image, sort_order)
+                VALUES (?,?,?,?,?,?,?,?)
                 """,
-                (event["id"], section_key, name, 1, initial_content, initial_content, "", new_sort),
+                (event["id"], section_key, name, 1, initial_content, initial_content, "", new_sort)
             )
             db.commit()
 
@@ -711,7 +866,6 @@ def register_event_routes(app):
         if not can_manage_event(event):
             abort(403)
 
-        # parse payload
         order = None
         if request.is_json:
             data = request.get_json(silent=True) or {}
@@ -722,7 +876,6 @@ def register_event_routes(app):
             if order is None and isinstance(data.get("order"), str):
                 order = [x.strip() for x in data.get("order").split(",") if x.strip()]
         if order is None:
-            # form payload
             order = request.form.getlist("order[]") or request.form.getlist("order") or []
             if len(order) == 1 and isinstance(order[0], str) and "," in order[0]:
                 order = [x.strip() for x in order[0].split(",") if x.strip()]
@@ -730,11 +883,8 @@ def register_event_routes(app):
         if not order:
             return ("", 204)
 
-        # Validate: keep only keys that belong to this event
-        sections = get_event_sections(event["id"])  # ordered dict
+        sections = get_event_sections(event["id"])
         valid = [k for k in order if k in sections]
-
-        # also include any sections not present in payload (append at end, keep existing relative order)
         for k in sections.keys():
             if k not in valid:
                 valid.append(k)
@@ -755,6 +905,7 @@ def register_event_routes(app):
     @login_required
     def custom_section_save_draft(slug, section_key):
         import json
+
         event = get_event_by_slug(slug)
         if not event:
             return ("Not found", 404)
@@ -808,6 +959,7 @@ def register_event_routes(app):
     @login_required
     def custom_section_publish(slug, section_key):
         import json
+
         event = get_event_by_slug(slug)
         if not event:
             return render_template("not_found.html", user=current_user()), 404
@@ -850,7 +1002,6 @@ def register_event_routes(app):
             except Exception:
                 pass
 
-        # ✅ IMPORTANT FIX: keep draft_content in sync with content (do not clear)
         db.execute(
             "UPDATE sections SET content=?, draft_content=? WHERE event_id=? AND section_key=?",
             (new_content, new_content, event["id"], section_key),
@@ -886,9 +1037,10 @@ def register_event_routes(app):
             flash("Section not found.")
             return redirect(url_for("event_section", slug=slug, section_key="home"))
 
+        # If image is local file, attempt delete. If it's a URL (Drive), do nothing.
         try:
             img = (sec["image"] or "").strip()
-            if img:
+            if img and (not _is_url(img)):
                 path = os.path.join(current_app.config["UPLOAD_FOLDER"], img)
                 if os.path.exists(path):
                     os.remove(path)
@@ -926,13 +1078,15 @@ def register_event_routes(app):
 
         section = sections[section_key]
         real_admin = can_manage_event(event)
+
         view_as_user = bool(session.get(preview_session_key(slug)))
         if real_admin and (request.args.get("_as_user") == "1"):
             view_as_user = True
+
         draft_preview = bool(real_admin and (request.args.get("_draft") == "1"))
         is_admin = real_admin and (not view_as_user)
 
-        # Public users (not event owner/admin) should see the single-page, scrollable view
+        # Public users (not owner/admin) see the single-page view
         if (not real_admin) and (not view_as_user):
             return redirect(url_for("event_public_all_sections", slug=slug))
 
@@ -1133,30 +1287,24 @@ def register_event_routes(app):
     # -------- public single-page scroll view --------
     @app.route("/events/<slug>/all")
     def event_public_all_sections(slug):
-        """Public, single-page view that stacks all visible sections and uses anchor navigation.
-        Admins/owners keep the existing per-section UX.
-        """
         event = get_event_by_slug(slug)
         if not event:
             return render_template("not_found.html", user=current_user()), 404
 
-        # must be logged in to view events (same policy as per-section)
         if not current_user():
             flash("Please log in to access this event.")
             return redirect(url_for("login", next=url_for("event_gate", slug=slug)))
 
-        # enforce passcode unlock rules
         if not has_event_view_access(event):
             return redirect(url_for("event_gate", slug=slug))
 
-        # admins/owners should stay on the normal UX
         if can_manage_event(event):
             return redirect(url_for("event_section", slug=slug, section_key="home"))
 
         ensure_default_sections(event["id"])
         sections = get_event_sections(event["id"])
 
-        def row_get(row, key, default=None):
+        def row_get_local(row, key, default=None):
             try:
                 if row is None:
                     return default
@@ -1166,8 +1314,6 @@ def register_event_routes(app):
             except Exception:
                 return default
 
-        # Public view should mirror persisted drag-and-drop order.
-        # get_event_sections() is ordered by sort_order ASC, id ASC and dict preserves insertion order.
         order = list(sections.keys())
         public_sections = []
         for key in order:
@@ -1175,11 +1321,10 @@ def register_event_routes(app):
             if not s:
                 continue
 
-            # skip hidden sections for public users
-            if int(row_get(s, "visible", 1) or 0) == 0:
+            if int(row_get_local(s, "visible", 1) or 0) == 0:
                 continue
 
-            title = (row_get(s, "title") or "").strip()
+            title = (row_get_local(s, "title") or "").strip()
             if not title:
                 title = {
                     "home": "Home",
@@ -1192,18 +1337,17 @@ def register_event_routes(app):
                     "photos": "Photos",
                 }.get(key, key.replace("-", " ").title())
 
-            # image fallback: section image -> event cover image
-            img = (row_get(s, "image") or "").strip()
+            img = (row_get_local(s, "image") or "").strip()
             if not img:
-                img = (event["cover_image"] or "").strip()
+                img = (event.get("cover_image") or event["cover_image"] or "").strip()
 
             kind = "html"
-            html = row_get(s, "content") or ""
+            html = row_get_local(s, "content") or ""
             items = []
 
             if key in ("tidbits", "qa") or key.startswith("custom-qa-"):
                 kind = "qa_list"
-                items = parse_qa_list_json(row_get(s, "content") or "[]")
+                items = parse_qa_list_json(row_get_local(s, "content") or "[]")
             elif key in ("rsvp", "photos"):
                 kind = "link"
             elif key == "home":
