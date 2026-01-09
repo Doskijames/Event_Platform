@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base.html" %} 
 {% block content %}
 
 <div class="container">
@@ -37,7 +37,7 @@
       <a class="event-card" href="{{ url_for('event_gate', slug=e.slug) }}">
         <div class="event-cover">
           {% if e.cover_image %}
-            <img src="{{ url_for('static', filename='uploads/' + e.cover_image) }}" alt="Event cover">
+            <img src="{{ url_for('static', filename='uploads/' + e.cover_image) }}" alt="Event cover" loading="lazy">
           {% else %}
             <div class="event-cover-placeholder">No Cover Photo</div>
           {% endif %}
