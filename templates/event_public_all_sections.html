@@ -20,110 +20,107 @@
   </div>
 </nav>
 
-<div class="joy-single" id="joySingle">
+<!-- ✅ IMPORTANT: this wrapper is what your CSS uses to control width + responsive layout -->
+<div class="joy-single-wrap public-single">
 
-  <!-- LEFT: sticky slideshow -->
-  <div class="joy-single-left">
-    <!-- hamburger -->
-    <button type="button" id="joyBurger" class="joy-burger" aria-label="Open menu" aria-expanded="false">
-      ☰
-    </button>
+  <div class="joy-single" id="joySingle">
 
-    <div class="joy-slideshow">
-      <img id="joyImgA" class="joy-slide is-active" src="" alt="Section image">
-      <img id="joyImgB" class="joy-slide" src="" alt="Section image">
+    <!-- LEFT: sticky slideshow -->
+    <div class="joy-single-left">
+      <!-- hamburger -->
+      <button type="button" id="joyBurger" class="joy-burger" aria-label="Open menu" aria-expanded="false">
+        ☰
+      </button>
 
-      <div class="joy-left-overlay">
-        <div class="joy-left-title">{{ event.name }}</div>
+      <div class="joy-slideshow">
+        <img id="joyImgA" class="joy-slide is-active" src="" alt="Section image">
+        <img id="joyImgB" class="joy-slide" src="" alt="Section image">
+
+        <div class="joy-left-overlay">
+          <div class="joy-left-title">{{ event.name }}</div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- RIGHT: vertical scrolling sections (THIS is the scroller) -->
-  <div class="joy-single-right" id="joyScroll">
-    {% for s in public_sections %}
-      {% set img_src = (url_for('static', filename='uploads/' ~ s.image) if s.image else (url_for('static', filename='uploads/' ~ event.cover_image) if event.cover_image else '')) %}
-      <section
-        id="sec-{{ s.key }}"
-        class="joy-section"
-        data-key="{{ s.key }}"
-        data-img="{{ img_src }}"
-      >
-        <div class="joy-section-inner">
+    <!-- RIGHT: vertical scrolling sections (THIS is the scroller on desktop) -->
+    <div class="joy-single-right" id="joyScroll">
+      {% for s in public_sections %}
+        <section
+          id="sec-{{ s.key }}"
+          class="joy-section"
+          data-key="{{ s.key }}"
+          data-img="{{ (url_for('static', filename='uploads/' ~ s.image) if s.image else (url_for('static', filename='uploads/' ~ event.cover_image) if event.cover_image else '')) }}"
+        >
+          <div class="joy-section-inner">
 
-          <h2 class="joy-section-title">{{ s.title }}</h2>
+            <h2 class="joy-section-title">{{ s.title }}</h2>
 
-          {% if img_src %}
-            <div class="joy-inline-media">
-              <img class="joy-inline-img" src="{{ img_src }}" alt="{{ s.title }} image" loading="lazy">
-            </div>
-          {% endif %}
+            {% if s.kind == "home" %}
+              <div class="joy-home-inline">
+                <h1 class="joy-names" style="margin:6px 0 8px;">{{ event.name }}</h1>
+                <p class="joy-message" style="margin:0 0 14px;">We can’t wait to share our special day with you.</p>
 
-          {% if s.kind == "home" %}
-            <div class="joy-home-inline">
-              <h1 class="joy-names" style="margin:6px 0 8px;">{{ event.name }}</h1>
-              <p class="joy-message" style="margin:0 0 14px;">We can’t wait to share our special day with you.</p>
-
-              <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-                <a class="joy-cta" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">RSVP</a>
-              </div>
-
-              <div class="joy-date-card" style="margin-top:0;">
-                <div class="joy-date-weekday" id="homeWeekday">—</div>
-                <div class="joy-date-long" id="homeLongDate">—</div>
-                <div class="joy-date-location">{{ event.location }}</div>
-
-                <div class="joy-countdown">
-                  <span class="joy-countdown-value" id="homeCdDays">--</span> DAYS
-                  <span class="joy-countdown-value" id="homeCdHrs">--</span> HRS
-                  <span class="joy-countdown-value" id="homeCdMins">--</span> MINS
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+                  <a class="joy-cta" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">RSVP</a>
                 </div>
 
-                <a class="joy-unlock" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">RSVP</a>
-              </div>
+                <div class="joy-date-card" style="margin-top:0;">
+                  <div class="joy-date-weekday" id="homeWeekday">—</div>
+                  <div class="joy-date-long" id="homeLongDate">—</div>
+                  <div class="joy-date-location">{{ event.location }}</div>
 
-              {% if event.description %}
-                <p style="margin-top:16px; line-height:1.7;">{{ event.description }}</p>
-              {% endif %}
-            </div>
-
-          {% elif s.kind == "qa_list" %}
-            {% set qa_items = (s["items"] if (s is mapping and "items" in s) else []) %}
-            {% if qa_items %}
-              <div class="joy-qa-list">
-                {% for it in qa_items %}
-                  <div class="joy-qa-card">
-                    <div class="joy-qa-q">{{ it.q }}</div>
-                    <div class="joy-qa-a">{{ it.a }}</div>
+                  <div class="joy-countdown">
+                    <span class="joy-countdown-value" id="homeCdDays">--</span> DAYS
+                    <span class="joy-countdown-value" id="homeCdHrs">--</span> HRS
+                    <span class="joy-countdown-value" id="homeCdMins">--</span> MINS
                   </div>
-                {% endfor %}
+
+                  <a class="joy-unlock" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">RSVP</a>
+                </div>
+
+                {% if event.description %}
+                  <p style="margin-top:16px; line-height:1.7;">{{ event.description }}</p>
+                {% endif %}
               </div>
+
+            {% elif s.kind == "qa_list" %}
+              {% set qa_items = (s["items"] if (s is mapping and "items" in s) else []) %}
+              {% if qa_items %}
+                <div class="joy-qa-list">
+                  {% for it in qa_items %}
+                    <div class="joy-qa-card">
+                      <div class="joy-qa-q">{{ it.q }}</div>
+                      <div class="joy-qa-a">{{ it.a }}</div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="muted" style="font-weight:900;">Nothing here yet.</div>
+              {% endif %}
+
+            {% elif s.kind == "link" %}
+              {% if s.key == "rsvp" %}
+                <a class="btn" href="{{ url_for('rsvp_form', slug=event.slug) }}">Open RSVP</a>
+              {% elif s.key == "photos" %}
+                <a class="btn" href="{{ url_for('event_photos', slug=event.slug) }}">Open Photos</a>
+              {% else %}
+                <div class="muted" style="font-weight:900;">Open section</div>
+              {% endif %}
+
             {% else %}
-              <div class="muted" style="font-weight:900;">Nothing here yet.</div>
+              {% if s.html and (s.html|trim) %}
+                <div class="ql-editor story-public joy-html">
+                  {{ s.html|safe }}
+                </div>
+              {% else %}
+                <div class="muted" style="font-weight:900;">Nothing here yet.</div>
+              {% endif %}
             {% endif %}
 
-          {% elif s.kind == "link" %}
-            {% if s.key == "rsvp" %}
-              <a class="btn" href="{{ url_for('rsvp_form', slug=event.slug) }}">Open RSVP</a>
-            {% elif s.key == "photos" %}
-              <a class="btn" href="{{ url_for('event_photos', slug=event.slug) }}">Open Photos</a>
-            {% else %}
-              <div class="muted" style="font-weight:900;">Open section</div>
-            {% endif %}
-
-          {% else %}
-            {% if s.html and (s.html|trim) %}
-              <div class="ql-editor story-public joy-html">
-                {{ s.html|safe }}
-              </div>
-            {% else %}
-              <div class="muted" style="font-weight:900;">Nothing here yet.</div>
-            {% endif %}
-          {% endif %}
-
-        </div>
-      </section>
-    {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+    </div>
   </div>
 </div>
 
@@ -172,7 +169,6 @@
     }
   }
 
-  // ✅ root MUST be the right scroll container (THIS WAS YOUR MAIN ISSUE)
   const obs = new IntersectionObserver((entries)=>{
     const visible = entries
       .filter(e => e.isIntersecting)
@@ -191,7 +187,6 @@
   sections.forEach(s => obs.observe(s));
   initImage();
 
-  // ✅ Smooth scroll inside the right pane (NOT window)
   function scrollToAnchor(hash){
     if(!hash || !hash.startsWith("#sec-")) return;
     const el = scroll.querySelector(hash);
