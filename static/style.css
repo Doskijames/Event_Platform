@@ -1827,3 +1827,44 @@ textarea.joy-autogrow{
     height: min(520px, 55vh);
   }
 }
+
+/* ===============================
+   EVENT COVER IMAGE – AUTO ADJUST
+   =============================== */
+
+.event-cover {
+  position: relative;
+  width: 100%;
+  background: #000; /* fallback */
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+/* Default: show full image (no crop) */
+.event-cover img {
+  width: 100%;
+  height: auto;
+  max-height: 340px;            /* prevents extreme tall images */
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  background: #000;
+}
+
+/* -------------------------------
+   MOBILE ONLY: crop to fill frame
+   ------------------------------- */
+@media (max-width: 768px) {
+  .event-cover {
+    height: 240px;              /* fixed frame on mobile */
+  }
+
+  .event-cover img {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    object-fit: cover;          /* crop only on mobile */
+    object-position: center;
+  }
+}
+
