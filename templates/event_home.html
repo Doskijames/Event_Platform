@@ -1,25 +1,53 @@
 {% extends "event_base.html" %}
 {% block event_content %}
 
-<!-- HERO COVER (photo + overlay text + RSVP) -->
-<section class="joy-hero">
+<!-- HERO COVER (auto-height image + overlay text) -->
+<section class="joy-hero" style="position: relative; width: 100%; overflow: hidden;">
 
   {% if section.image %}
-    <img class="joy-hero-img"
-         src="{{ url_for('static', filename='uploads/' + section.image) }}"
-         alt="Event hero image">
+    <img
+      src="{{ url_for('static', filename='uploads/' + section.image) }}"
+      alt="Event hero image"
+      style="
+        width: 100%;
+        height: auto;
+        display: block;
+      "
+    >
   {% else %}
-    <div class="joy-hero-placeholder">
+    <div class="joy-hero-placeholder" style="padding: 80px 20px;">
       <div>
         <h2 class="accent" style="margin:0;">Add a hero photo</h2>
-        <p class="muted" style="margin:10px 0 0;">Admin / Owner can upload the celebrant/couple photo here.</p>
+        <p class="muted" style="margin:10px 0 0;">
+          Admin / Owner can upload the celebrant/couple photo here.
+        </p>
       </div>
     </div>
   {% endif %}
 
-  <div class="joy-hero-overlay">
-  {# Event name moved to base/topbar for public view #}
-    <p class="joy-message">We can’t wait to share our special day with you.</p>
+  <!-- Overlay content -->
+  <div
+    class="joy-hero-overlay"
+    style="
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 24px;
+      background: linear-gradient(
+        to top,
+        rgba(0,0,0,0.6),
+        rgba(0,0,0,0.0)
+      );
+      color: #fff;
+      text-align: center;
+    "
+  >
+    <p class="joy-message" style="margin-bottom: 12px;">
+      We can’t wait to share our special day with you.
+    </p>
 
     <a class="joy-cta" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">
       RSVP
@@ -67,6 +95,16 @@
           class="admin-box">
       <button class="btn btn-outline" type="submit">
         {% if section.visible %}Hide Home Section{% else %}Show Home Section{% endif %}
+      </button>
+    </form>
+
+    <!-- DELETE EVENT -->
+    <form method="POST"
+          action="{{ url_for('delete_event', slug=event.slug) }}"
+          class="admin-box"
+          onsubmit="return confirm('⚠️ Are you sure you want to permanently delete this event? This cannot be undone.');">
+      <button class="btn btn-danger" type="submit">
+        🗑️ Delete Event
       </button>
     </form>
   </div>
