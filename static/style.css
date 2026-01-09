@@ -1909,3 +1909,132 @@ textarea.joy-autogrow{
   .navlink{ padding: 6px 10px; }
   .brand{ font-size: 18px; }
 }
+
+/* =========================================================
+   MOBILE FIXES: Full-width panes + better portrait behavior
+   (ADD THIS AT THE VERY BOTTOM OF style.css)
+   ========================================================= */
+
+/* Base/topbar: prevent overflow + keep email from wrecking layout */
+@media (max-width: 720px) {
+  .topbar .nav {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .nav-left, .nav-right {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* If the email is inside .nav-right and uses .muted, clamp it */
+  .nav-right .muted {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+}
+
+/* Public single-page wrapper: use the full phone width */
+@media (max-width: 900px) {
+  .event-shell {
+    max-width: 100%;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .joy-single-wrap.public-single {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Stack slideshow on top, content underneath */
+  .joy-single {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .joy-single-left,
+  .joy-single-right {
+    width: 100%;
+  }
+
+  /* Remove “desktop scroller” behavior on mobile */
+  .joy-single-right {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Slideshow becomes a responsive banner */
+  .joy-slideshow {
+    width: 100%;
+    height: min(46vh, 420px);
+    min-height: 260px;
+    border-radius: 22px;
+    overflow: hidden;
+  }
+
+  /* Slides fill the frame nicely */
+  .joy-slide {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  /* Give content more usable width */
+  .joy-section-inner {
+    padding: 18px 16px;
+  }
+}
+
+/* Extra tight phones: reduce side padding even more */
+@media (max-width: 420px) {
+  .event-shell {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .joy-section-inner {
+    padding: 16px 12px;
+  }
+
+  .joy-slideshow {
+    min-height: 240px;
+  }
+}
+
+/* Landscape phones: allow a 2-column feel if there’s room */
+@media (max-width: 900px) and (orientation: landscape) {
+  .joy-single {
+    display: grid;
+    grid-template-columns: 0.95fr 1.05fr;
+    gap: 14px;
+    align-items: start;
+  }
+
+  .joy-single-left {
+    position: sticky;
+    top: 12px;
+  }
+
+  .joy-single-right {
+    height: calc(100vh - 24px) !important;
+    overflow: auto !important;
+  }
+
+  .joy-slideshow {
+    height: calc(100vh - 24px);
+    min-height: 320px;
+  }
+}
+
+
+
