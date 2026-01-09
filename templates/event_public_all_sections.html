@@ -20,7 +20,7 @@
   </div>
 </nav>
 
-<div class="joy-single-wrap public-single" id="joySingle">
+<div class="joy-single" id="joySingle">
 
   <!-- LEFT: sticky slideshow -->
   <div class="joy-single-left">
@@ -50,12 +50,6 @@
         data-img="{{ img_src }}"
       >
         <div class="joy-section-inner">
-
-
-          {% set img_url = (url_for('static', filename='uploads/' ~ s.image) if s.image else (url_for('static', filename='uploads/' ~ event.cover_image) if event.cover_image else '')) %}
-          {% if img_url %}
-            <img class="joy-mobile-img" src="{{ img_url }}" alt="{{ s.title }} image" loading="lazy">
-          {% endif %}
 
           <h2 class="joy-section-title">{{ s.title }}</h2>
 
