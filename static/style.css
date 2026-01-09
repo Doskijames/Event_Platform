@@ -1970,3 +1970,95 @@ textarea.joy-autogrow{
   }
 }
 
+/* =========================================================
+   MOBILE FIXES – FULL WIDTH PANELS + IMAGE FIT
+   ========================================================= */
+@media (max-width: 768px) {
+
+  /* --- Public single page container --- */
+  .joy-single {
+    display: block;
+    width: 100%;
+  }
+
+  /* Disable split layout on mobile */
+  .joy-single-left {
+    display: none;
+  }
+
+  .joy-single-right {
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  /* --- Sections should span full phone width --- */
+  .joy-section {
+    width: 100%;
+    padding: 16px 12px;
+  }
+
+  .joy-section-inner {
+    max-width: 100%;
+    margin: 0;
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  /* --- Section titles --- */
+  .joy-section-title {
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  /* --- HOME / MEET / IMAGE PANELS --- */
+  .joy-hero,
+  .joy-home-inline,
+  .joy-section img,
+  .joy-hero-img {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* 🔑 IMAGE FIX (NO BLACK BARS) */
+  .joy-hero-img,
+  .joy-section img {
+    height: auto;
+    max-height: 70vh;          /* prevent crazy tall images */
+    object-fit: contain;       /* show FULL image */
+    background: #000;          /* soft fallback */
+    border-radius: 16px;
+    display: block;
+  }
+
+  /* --- Event cards (events.html) --- */
+  .event-card {
+    width: 100%;
+    margin: 0 auto 16px;
+  }
+
+  .event-cover img {
+    width: 100%;
+    height: auto;
+    max-height: 60vh;
+    object-fit: contain;
+    background: #000;
+  }
+
+  /* --- Fix narrow content feeling --- */
+  .container {
+    padding-left: 12px;
+    padding-right: 12px;
+    max-width: 100%;
+  }
+
+  /* --- Buttons --- */
+  .joy-cta,
+  .joy-unlock,
+  .btn {
+    width: 100%;
+    text-align: center;
+  }
+}
+
