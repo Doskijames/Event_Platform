@@ -1772,302 +1772,140 @@ textarea.joy-autogrow{
   resize: none;
   overflow: hidden;
 }
+/* =========================================================
+   Mobile + Image fitting improvements (2026-01)
+   - Make top nav wrap cleanly on phones (base.html)
+   - Public single-page view: full-width on mobile, show inline images
+   - Event cards + hero images: "contain" foreground with blurred cover background
+   ========================================================= */
 
-/* ============================================================
-   Image sizing overrides (added)
-   Goal:
-   - Desktop/tablet: show the FULL image (contain, no zoom-crop)
-   - Mobile: auto center-crop for a nicer hero/card look
-   - Prevent extremely tall portrait photos from taking over the page
-   ============================================================ */
-
-/* Event Home hero image */
-.joy-hero { 
-  background: #0b0b0b; /* shows as letterbox when using contain */
-}
-
-.joy-hero-img{
-  width: 100%;
-  /* Keep a predictable hero height but show the FULL image */
-  height: min(520px, 60vh);
-  max-height: 520px;
-  object-fit: contain;
-  object-position: center center;
-  display: block;
-}
-
-/* Events grid cover images */
+/* ---------- Event cards: fill frame without black bars ---------- */
 .event-cover{
-  background: #0b0b0b; /* letterbox background for contain */
+  position: relative;
+  overflow: hidden;
+}
+.event-cover .event-cover-bg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  filter: blur(18px);
+  transform: scale(1.12);
+  opacity: .55;
+  z-index: 0;
+}
+.event-cover .event-cover-fg{
+  position: relative;
+  z-index: 1;
+  width:100%;
+  height:100%;
+  object-fit: contain; /* show the whole image */
+  background: transparent;
 }
 
-.event-cover img{
-  object-fit: contain;
-  object-position: center center;
-}
-
-/* Mobile: crop (cover) + center */
-@media (max-width: 640px){
-  .joy-hero-img{
-    height: 420px;        /* mobile hero height */
-    max-height: 70vh;     /* protects very small screens */
-    object-fit: cover;    /* crop on mobile only */
-    object-position: center center;
-  }
-
-  .event-cover img{
-    object-fit: cover;    /* crop on mobile cards only */
-    object-position: center center;
-  }
-}
-
-/* Extra protection for very tall portrait images on larger screens */
-@media (min-width: 641px){
-  .joy-hero-img{
-    height: min(520px, 55vh);
-  }
-}
-
-/* ===============================
-   EVENT COVER IMAGE – AUTO ADJUST
-   =============================== */
-
-.event-cover {
+/* ---------- Event home hero: same technique ---------- */
+.joy-hero-media{
   position: relative;
   width: 100%;
-  background: #000; /* fallback */
-  overflow: hidden;
-  border-radius: inherit;
+  height: 100%;
+}
+.joy-hero-media .joy-hero-bg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  filter: blur(18px);
+  transform: scale(1.12);
+  opacity: .55;
+  z-index: 0;
+}
+.joy-hero-media .joy-hero-img{
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* desktop = full image */
+  object-position: center;
+  background: transparent;
 }
 
-/* Default: show full image (no crop) */
-.event-cover img {
+/* Mobile: center-crop ONLY on small screens (no black bars) */
+@media (max-width: 640px){
+  .joy-hero{ height: min(72vh, 560px); }
+  .joy-hero-media .joy-hero-img{
+    object-fit: cover;
+    object-position: center;
+  }
+}
+
+/* ---------- Public single page (event_public_all_sections) ---------- */
+/* Inline images are hidden on desktop because the left slideshow is used */
+.joy-inline-media{ display:none; }
+.joy-inline-img{
   width: 100%;
   height: auto;
-  max-height: 340px;            /* prevents extreme tall images */
+  max-height: 72vh; /* cap tall portraits */
   object-fit: contain;
   object-position: center;
-  display: block;
-  background: #000;
+  border-radius: 22px;
+  background: rgba(0,0,0,.25);
 }
 
-/* -------------------------------
-   MOBILE ONLY: crop to fill frame
-   ------------------------------- */
-@media (max-width: 768px) {
-  .event-cover {
-    height: 240px;              /* fixed frame on mobile */
-  }
-
-  .event-cover img {
+/* Mobile: make the right pane full width & use inline images */
+@media (max-width: 900px){
+  .joy-single{ display:block; height:auto; }
+  .joy-single-left{ display:none; } /* hide sticky slideshow */
+  .joy-single-right{
     width: 100%;
-    height: 100%;
-    max-height: none;
-    object-fit: cover;          /* crop only on mobile */
-    object-position: center;
+    max-width: none;
+    height: auto;
+    overflow: visible; /* scroll the page normally */
+    padding: 0 12px 28px;
   }
-}
-
-/* ==========================================
-   PUBLIC SINGLE PAGE (event_public_all_sections)
-   MOBILE FRIENDLY OVERRIDES (desktop unchanged)
-   ========================================== */
-
-/* Hide the inline per-section image on desktop */
-.joy-section-img-mobile {
-  display: none;
-}
-
-/* Desktop layout remains: 2-column with right-pane scroll */
-@media (max-width: 900px) {
-
-  /* Turn the whole layout into a normal page */
-  .joy-single {
-    display: block !important;
-    height: auto !important;
-    min-height: 0 !important;
+  .joy-section{
+    min-height: 0;
+    padding: 22px 0;
   }
-
-  /* Disable sticky left slideshow column on mobile */
-  .joy-single-left {
-    position: relative !important;
-    width: 100% !important;
-    height: auto !important;
-    min-height: 0 !important;
-    border-radius: 0 !important;
-  }
-
-  /* Make slideshow behave like a normal banner on mobile */
-  .joy-slideshow {
-    position: relative !important;
-    width: 100% !important;
-    height: 240px !important;
-    overflow: hidden !important;
-    border-radius: 0 !important;
-  }
-
-  .joy-slide {
-    position: absolute !important;
-    inset: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: cover !important;     /* mobile crop */
-    object-position: center !important;
-  }
-
-  /* Right pane should scroll normally with the page */
-  .joy-single-right {
-    height: auto !important;
-    overflow: visible !important;
-    width: 100% !important;
-  }
-
-  /* Show per-section inline images on mobile */
-  .joy-section-img-mobile {
-    display: block;
-    width: 100%;
-    margin: 10px 0 14px;
-    overflow: hidden;
-    border-radius: 14px;
-    background: #000;
-  }
-
-  .joy-section-img-mobile img {
-    width: 100%;
-    height: 220px;
-    object-fit: cover;                /* auto center crop mobile */
-    object-position: center;
-    display: block;
-  }
-
-  /* Prevent text from feeling cramped */
-  .joy-section-inner {
-    padding: 18px 14px !important;
-  }
-
-  .joy-section-title {
-    font-size: 1.35rem !important;
-    line-height: 1.2 !important;
-  }
-
-  .joy-html, .ql-editor.story-public {
-    font-size: 1rem !important;
-    line-height: 1.7 !important;
-    word-break: break-word;
-  }
-
-  /* Make QA cards breathe more on mobile */
-  .joy-qa-card {
-    padding: 14px !important;
-  }
-
-  /* Burger button stays available */
-  .joy-burger {
-    position: absolute !important;
-    top: 12px !important;
-    left: 12px !important;
-    z-index: 50 !important;
-  }
-}
-
-/* =========================================================
-   MOBILE FIXES – FULL WIDTH PANELS + IMAGE FIT
-   ========================================================= */
-@media (max-width: 768px) {
-
-  /* --- Public single page container --- */
-  .joy-single {
-    display: block;
-    width: 100%;
-  }
-
-  /* Disable split layout on mobile */
-  .joy-single-left {
-    display: none;
-  }
-
-  .joy-single-right {
-    width: 100%;
-    max-width: 100%;
+  .joy-section-inner{
+    max-width: none;
     padding: 0;
-    overflow-x: hidden;
   }
-
-  /* --- Sections should span full phone width --- */
-  .joy-section {
-    width: 100%;
-    padding: 16px 12px;
-  }
-
-  .joy-section-inner {
-    max-width: 100%;
-    margin: 0;
-    padding: 16px;
-    border-radius: 16px;
-  }
-
-  /* --- Section titles --- */
-  .joy-section-title {
-    font-size: 22px;
-    line-height: 1.2;
-  }
-
-  /* --- HOME / MEET / IMAGE PANELS --- */
-  .joy-hero,
-  .joy-home-inline,
-  .joy-section img,
-  .joy-hero-img {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  /* 🔑 IMAGE FIX (NO BLACK BARS) */
-  .joy-hero-img,
-  .joy-section img {
-    height: auto;
-    max-height: 70vh;          /* prevent crazy tall images */
-    object-fit: contain;       /* show FULL image */
-    background: #000;          /* soft fallback */
-    border-radius: 16px;
-    display: block;
-  }
-
-  /* --- Event cards (events.html) --- */
-  .event-card {
-    width: 100%;
-    margin: 0 auto 16px;
-  }
-
-  .event-cover img {
-    width: 100%;
-    height: auto;
-    max-height: 60vh;
-    object-fit: contain;
-    background: #000;
-  }
-
-  /* --- Fix narrow content feeling --- */
-  .container {
-    padding-left: 12px;
-    padding-right: 12px;
-    max-width: 100%;
-  }
-
-  /* --- Buttons --- */
-  .joy-cta,
-  .joy-unlock,
-  .btn {
-    width: 100%;
-    text-align: center;
-  }
-}
-/* Desktop image style */
-@media (min-width: 769px) {
-  .joy-hero-img,
-  .joy-section img,
-  .event-cover img {
-    height: 420px;
-    object-fit: cover;
+  .joy-inline-media{ display:block; margin: 14px 0 18px; }
+  .joy-section-title{
+    font-size: 28px;
+    line-height: 1.15;
   }
 }
 
+/* ---------- Base/topbar mobile friendliness ---------- */
+@media (max-width: 720px){
+  .topbar{
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+  .nav-left,
+  .nav-right{
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+  .nav-right{
+    justify-content: flex-start;
+    align-items: center;
+  }
+  .nav-right .muted{
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .theme-toggle{
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .navlink{ padding: 6px 10px; }
+  .brand{ font-size: 18px; }
+}
