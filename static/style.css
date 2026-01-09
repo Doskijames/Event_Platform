@@ -1772,3 +1772,58 @@ textarea.joy-autogrow{
   resize: none;
   overflow: hidden;
 }
+
+/* ============================================================
+   Image sizing overrides (added)
+   Goal:
+   - Desktop/tablet: show the FULL image (contain, no zoom-crop)
+   - Mobile: auto center-crop for a nicer hero/card look
+   - Prevent extremely tall portrait photos from taking over the page
+   ============================================================ */
+
+/* Event Home hero image */
+.joy-hero { 
+  background: #0b0b0b; /* shows as letterbox when using contain */
+}
+
+.joy-hero-img{
+  width: 100%;
+  /* Keep a predictable hero height but show the FULL image */
+  height: min(520px, 60vh);
+  max-height: 520px;
+  object-fit: contain;
+  object-position: center center;
+  display: block;
+}
+
+/* Events grid cover images */
+.event-cover{
+  background: #0b0b0b; /* letterbox background for contain */
+}
+
+.event-cover img{
+  object-fit: contain;
+  object-position: center center;
+}
+
+/* Mobile: crop (cover) + center */
+@media (max-width: 640px){
+  .joy-hero-img{
+    height: 420px;        /* mobile hero height */
+    max-height: 70vh;     /* protects very small screens */
+    object-fit: cover;    /* crop on mobile only */
+    object-position: center center;
+  }
+
+  .event-cover img{
+    object-fit: cover;    /* crop on mobile cards only */
+    object-position: center center;
+  }
+}
+
+/* Extra protection for very tall portrait images on larger screens */
+@media (min-width: 641px){
+  .joy-hero-img{
+    height: min(520px, 55vh);
+  }
+}
