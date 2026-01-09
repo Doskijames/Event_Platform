@@ -1868,3 +1868,105 @@ textarea.joy-autogrow{
   }
 }
 
+/* ==========================================
+   PUBLIC SINGLE PAGE (event_public_all_sections)
+   MOBILE FRIENDLY OVERRIDES (desktop unchanged)
+   ========================================== */
+
+/* Hide the inline per-section image on desktop */
+.joy-section-img-mobile {
+  display: none;
+}
+
+/* Desktop layout remains: 2-column with right-pane scroll */
+@media (max-width: 900px) {
+
+  /* Turn the whole layout into a normal page */
+  .joy-single {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  /* Disable sticky left slideshow column on mobile */
+  .joy-single-left {
+    position: relative !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  /* Make slideshow behave like a normal banner on mobile */
+  .joy-slideshow {
+    position: relative !important;
+    width: 100% !important;
+    height: 240px !important;
+    overflow: hidden !important;
+    border-radius: 0 !important;
+  }
+
+  .joy-slide {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;     /* mobile crop */
+    object-position: center !important;
+  }
+
+  /* Right pane should scroll normally with the page */
+  .joy-single-right {
+    height: auto !important;
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  /* Show per-section inline images on mobile */
+  .joy-section-img-mobile {
+    display: block;
+    width: 100%;
+    margin: 10px 0 14px;
+    overflow: hidden;
+    border-radius: 14px;
+    background: #000;
+  }
+
+  .joy-section-img-mobile img {
+    width: 100%;
+    height: 220px;
+    object-fit: cover;                /* auto center crop mobile */
+    object-position: center;
+    display: block;
+  }
+
+  /* Prevent text from feeling cramped */
+  .joy-section-inner {
+    padding: 18px 14px !important;
+  }
+
+  .joy-section-title {
+    font-size: 1.35rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .joy-html, .ql-editor.story-public {
+    font-size: 1rem !important;
+    line-height: 1.7 !important;
+    word-break: break-word;
+  }
+
+  /* Make QA cards breathe more on mobile */
+  .joy-qa-card {
+    padding: 14px !important;
+  }
+
+  /* Burger button stays available */
+  .joy-burger {
+    position: absolute !important;
+    top: 12px !important;
+    left: 12px !important;
+    z-index: 50 !important;
+  }
+}
+
