@@ -2,28 +2,21 @@
 {% block content %}
 
 <!-- =========================
-     FULL-WIDTH HERO (LOOP ONLY)
+     FULL-WIDTH HERO (IMAGE ONLY)
      ========================= -->
-<section class="hero-video">
+<section class="hero-image">
 
-  <!-- Background loop video (silent autoplay) -->
-  <video class="bg-video" autoplay muted loop playsinline>
-    <source src="{{ url_for('static', filename='hero-loop.mp4') }}" type="video/mp4">
-  </video>
-
-  <!-- Dark overlay for readability -->
-  <div class="bg-overlay" aria-hidden="true"></div>
-
-  <!-- Foreground content -->
+  <!-- Background image -->
   <div class="hero-foreground">
 
-    <!-- LOGO FROM GOOGLE DRIVE -->
+    <!-- HARD-CODED GOOGLE DRIVE LOGO -->
     <img
       src="https://drive.google.com/uc?export=view&id=1Hziuadjq8xaeeCnGPULi0G7zpIgI6eDy"
       alt="E-Accesslink.ng"
       class="logo-main"
       loading="eager"
       referrerpolicy="no-referrer"
+      onerror="this.onerror=null;this.src='{{ url_for('static', filename='Eaccess_logo.png') }}';"
     />
 
     <h1 class="logo-title">E-Accesslink.ng</h1>
@@ -31,7 +24,6 @@
 
     <div class="hero-actions">
       <a class="btn" href="/events">View Events</a>
-      <a class="btn btn-outline" href="/watch">Watch Video</a>
       {% if user %}
         <a class="btn btn-outline" href="/logout">Logout</a>
       {% else %}
@@ -41,40 +33,42 @@
     </div>
 
     <p class="muted hero-subtext">
-      Seamless, secure, and efficient QR-based access management for events, venues, and modern organizations.
+      Seamless, secure, and efficient QR-based access management for events,
+      venues, and modern organizations.
     </p>
 
   </div>
 </section>
 
 <!-- =========================
-     MAIN CONTENT (CONTAINED)
+     MAIN CONTENT
      ========================= -->
 <div class="container">
 
   <section class="section">
     <h2>What we do</h2>
     <p>
-      At <strong>E-Accesslink.ng</strong>, we specialize in creating seamless, secure, and efficient access management
-      solutions tailored to the needs of modern organizations.
+      At <strong>E-Accesslink.ng</strong>, we create seamless, secure,
+      and efficient QR-based access solutions for modern events and venues.
     </p>
   </section>
 
   <section class="section">
     <h2>How it works</h2>
     <p>
-      We generate secure QR codes for access, enabling fast, contactless, and reliable entry management.
+      We generate unique QR codes for attendees, enabling fast,
+      contactless, and secure entry management.
     </p>
   </section>
 
   <section class="section">
     <h2>Where it can be used</h2>
     <p>
-      Corporate events, weddings, private venues, and more — anywhere access control matters.
+      Corporate events, weddings, private venues, and anywhere access
+      control matters.
     </p>
   </section>
 
 </div>
 
 {% endblock %}
-
