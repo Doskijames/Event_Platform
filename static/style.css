@@ -2061,4 +2061,13 @@ textarea.joy-autogrow{
     text-align: center;
   }
 }
+/* Desktop image style */
+@media (min-width: 769px) {
+  .joy-hero-img,
+  .joy-section img,
+  .event-cover img {
+    height: 420px;
+    object-fit: cover;
+  }
+}
 
