@@ -5,10 +5,15 @@
 <section class="joy-hero">
 
   {% if section.image %}
-    <img class="joy-hero-img"
-         src="{{ url_for('static', filename='uploads/' + section.image) }}"
-         alt="Event hero image"
-         loading="eager">
+    <div class="joy-hero-media">
+      <img class="joy-hero-bg"
+           src="{{ url_for('static', filename='uploads/' + section.image) }}"
+           alt=""
+           aria-hidden="true">
+      <img class="joy-hero-img"
+           src="{{ url_for('static', filename='uploads/' + section.image) }}"
+           alt="Event hero image">
+    </div>
   {% else %}
     <div class="joy-hero-placeholder">
       <div>
