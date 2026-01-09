@@ -1909,3 +1909,94 @@ textarea.joy-autogrow{
   .navlink{ padding: 6px 10px; }
   .brand{ font-size: 18px; }
 }
+
+
+/* =========================================================
+   MOBILE FIXES: TOPBAR + PUBLIC SINGLE PAGE (PORTRAIT/LANDSCAPE)
+   Keeps desktop layout unchanged.
+   ========================================================= */
+
+
+/* ---- Topbar: wrap/stack cleanly on small screens ---- */
+@media (max-width: 900px){
+  .topbar .container{padding-left:12px; padding-right:12px;}
+  .topbar-inner{flex-wrap:wrap; gap:10px;}
+  .brand{font-size:20px; line-height:1.1;}
+  .nav-left{flex-wrap:wrap; gap:12px; min-width:0;}
+  .nav-right{flex-wrap:wrap; gap:10px; justify-content:flex-start; min-width:0;}
+  .nav-link{white-space:nowrap;}
+  .user-email{max-width:100%; overflow:hidden; text-overflow:ellipsis;}
+  .theme-toggle{flex-wrap:wrap;}
+}
+
+
+/* ---- Public single-page: no narrow split panes on mobile ---- */
+@media (max-width: 900px){
+  .joy-single-wrap.public-single{
+    display:grid;
+    grid-template-columns: 1fr;
+    width:100%;
+    max-width:none;
+    margin:0;
+    border-radius:0;
+  }
+
+  .joy-single-wrap.public-single .joy-single-left{
+    position:relative;
+    top:auto;
+    height:38vh;               /* portrait */
+    min-height:240px;
+    max-height:520px;
+    border-right:none;
+    border-bottom:1px solid rgba(255,255,255,.10);
+  }
+
+  .joy-single-wrap.public-single .joy-single-right{
+    height:auto;
+    overflow:visible;          /* use normal page scroll */
+  }
+
+  .joy-single-wrap.public-single .joy-section{
+    min-height:auto;
+    padding:16px 0;
+  }
+
+  .joy-single-wrap.public-single .joy-section-inner{
+    max-width:none;
+    padding:0 14px;
+  }
+
+  /* Mobile-inline images inside each section (shown only on mobile) */
+  .joy-mobile-img{
+    display:block;
+    width:100%;
+    height:auto;
+    border-radius:18px;
+    margin:10px 0 14px;
+    background: rgba(0,0,0,.15);
+  }
+
+  /* Ensure the slideshow image fills the frame on mobile (no side bars) */
+  .joy-single-wrap.public-single .joy-slide{
+    object-fit:cover;
+    object-position:center;
+  }
+
+  /* Make the whole page use full width */
+  .container{max-width:none;}
+  .event-shell, .event-inner{max-width:none;}
+}
+
+/* Landscape tweak: reduce hero height so content fits */
+@media (max-width: 900px) and (orientation: landscape){
+  .joy-single-wrap.public-single .joy-single-left{
+    height:46vh;
+    min-height:180px;
+    max-height:420px;
+  }
+}
+
+/* Hide mobile-inline images on desktop */
+@media (min-width: 901px){
+  .joy-mobile-img{display:none;}
+}
