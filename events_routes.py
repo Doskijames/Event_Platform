@@ -186,6 +186,48 @@ def register_event_routes(app):
         session.pop(f"event_{slug}", None)
         return redirect(url_for("events"))
 
+    # ============================
+    # ✅ DELETE EVENT (NEW)
+    # Admin can delete any event.
+    # Owner can delete only events they created.
+    # ============================
+    @app.post("/events/<slug>/delete", endpoint="delete_event")
+    @login_required
+    def delete_event(slug):
+        event = get_event_by_slug(slug)
+        if not event:
+            return render_template("not_found.html", user=current_user()), 404
+
+        if not can_manage_event(event):
+            abort(403)
+
+        db = get_db()
+        event_id = int(event["id"])
+
+        # Best-effort cleanup of child rows to avoid FK issues on Postgres/SQLite.
+        # (Safe even if some tables don't exist in a user's schema yet.)
+        child_deletes = [
+            ("DELETE FROM sections WHERE event_id=?", (event_id,)),
+            ("DELETE FROM event_photos WHERE event_id=?", (event_id,)),
+            ("DELETE FROM photos_day_settings WHERE event_id=?", (event_id,)),
+            ("DELETE FROM rsvp_responses WHERE event_id=?", (event_id,)),
+            ("DELETE FROM rsvps WHERE event_id=?", (event_id,)),
+        ]
+
+        for sql, params in child_deletes:
+            try:
+                db.execute(sql, params)
+            except Exception:
+                # If a table doesn't exist in the current schema, ignore it.
+                pass
+
+        # Finally delete the event itself
+        db.execute("DELETE FROM events WHERE id=?", (event_id,))
+        db.commit()
+
+        flash("Event deleted successfully 🗑️")
+        return redirect(url_for("events"))
+
     @app.route("/events/<slug>/<section_key>/upload-image", methods=["POST"])
     @login_required
     def upload_section_image(slug, section_key):
@@ -649,7 +691,6 @@ def register_event_routes(app):
             is_admin=True,
         )
 
-    
     # -------- reorder sections (drag & drop) --------
     @app.route("/events/<slug>/sections/reorder", methods=["POST"])
     @app.route("/events/<slug>/sections/order", methods=["POST"])
@@ -709,7 +750,7 @@ def register_event_routes(app):
         db.commit()
         return ("", 204)
 
-# -------- custom sections drafts / publish --------
+    # -------- custom sections drafts / publish --------
     @app.route("/events/<slug>/sections/<section_key>/draft", methods=["POST"])
     @login_required
     def custom_section_save_draft(slug, section_key):
@@ -1089,7 +1130,6 @@ def register_event_routes(app):
             is_admin=is_admin,
         )
 
-
     # -------- public single-page scroll view --------
     @app.route("/events/<slug>/all")
     def event_public_all_sections(slug):
@@ -1188,4 +1228,3 @@ def register_event_routes(app):
             view_as_user=False,
             public_single=True,
         )
-
