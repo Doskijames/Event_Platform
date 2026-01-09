@@ -1,22 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- =========================
-     FULL-WIDTH HERO (IMAGE ONLY)
-     ========================= -->
 <section class="hero-image">
-
-  <!-- Background image -->
   <div class="hero-foreground">
 
-    <!-- HARD-CODED GOOGLE DRIVE LOGO -->
     <img
-      src="https://drive.google.com/uc?export=view&id=1Hziuadjq8xaeeCnGPULi0G7zpIgI6eDy"
+      src="https://drive.google.com/thumbnail?id=1Hziuadjq8xaeeCnGPULi0G7zpIgI6eDy&sz=w1000"
       alt="E-Accesslink.ng"
       class="logo-main"
       loading="eager"
       referrerpolicy="no-referrer"
-      onerror="this.onerror=null;this.src='{{ url_for('static', filename='Eaccess_logo.png') }}';"
+      onerror="this.onerror=null; this.src='{{ url_for('static', filename='Eaccess_logo.png') }}';"
     />
 
     <h1 class="logo-title">E-Accesslink.ng</h1>
@@ -40,11 +34,7 @@
   </div>
 </section>
 
-<!-- =========================
-     MAIN CONTENT
-     ========================= -->
 <div class="container">
-
   <section class="section">
     <h2>What we do</h2>
     <p>
@@ -56,19 +46,16 @@
   <section class="section">
     <h2>How it works</h2>
     <p>
-      We generate unique QR codes for attendees, enabling fast,
-      contactless, and secure entry management.
+      We generate unique QR codes for access, enabling fast, contactless, and secure entry management.
     </p>
   </section>
 
   <section class="section">
     <h2>Where it can be used</h2>
     <p>
-      Corporate events, weddings, private venues, and anywhere access
-      control matters.
+      Corporate events, weddings, private venues, and anywhere access control matters.
     </p>
   </section>
-
 </div>
 
 {% endblock %}
