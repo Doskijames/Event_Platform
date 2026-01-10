@@ -1,20 +1,44 @@
-{# templates/_media.html #}
+{# templates/_media.html
+   Central helper for turning stored media values into URLs.
+
+   Supports:
+     - local filenames in /static/uploads/
+     - full URLs
+     - Google Drive URLs / ids (proxied via /drive-media/<id>)
+#}
+
 {% macro media_url(v) -%}
-  {%- set s = (v or '') | string -%}
-  {%- set s = s.strip() -%}
-  {%- if not s -%}
-    {{ '' }}
-  {%- elif s.startswith('gdrive:') -%}
-    {{ url_for('drive_media', file_id=s.split('gdrive:', 1)[1]) }}
-  {%- elif 'id=' in s -%}
-    {%- set fid = s.split('id=', 1)[1].split('&', 1)[0] -%}
-    {{ url_for('drive_media', file_id=fid) }}
-  {%- elif '/d/' in s -%}
-    {%- set fid = s.split('/d/', 1)[1].split('/', 1)[0] -%}
-    {{ url_for('drive_media', file_id=fid) }}
-  {%- elif s.startswith('http://') or s.startswith('https://') -%}
-    {{ s }}
+  {%- set val = (v or '') | trim -%}
+  {%- if not val -%}
+    {{- '' -}}
   {%- else -%}
-    {{ url_for('static', filename='uploads/' ~ s) }}
+    {%- set fid = '' -%}
+
+    {# 1) explicit prefix #}
+    {%- if val.startswith('gdrive:') -%}
+      {%- set fid = val.split(':', 1)[1] -%}
+
+    {# 2) URL with id= query param #}
+    {%- elif 'id=' in val -%}
+      {%- set tmp = val.split('id=', 1)[1] -%}
+      {%- set fid = tmp.split('&', 1)[0] -%}
+
+    {# 3) /file/d/<id>/... #}
+    {%- elif '/file/d/' in val -%}
+      {%- set tmp = val.split('/file/d/', 1)[1] -%}
+      {%- set fid = tmp.split('/', 1)[0] -%}
+
+    {# 4) raw id heuristic #}
+    {%- elif ('/' not in val) and (' ' not in val) and (val|length >= 20) -%}
+      {%- set fid = val -%}
+    {%- endif -%}
+
+    {%- if fid -%}
+      {{- url_for('drive_media', file_id=fid) -}}
+    {%- elif val.startswith('http://') or val.startswith('https://') -%}
+      {{- val -}}
+    {%- else -%}
+      {{- url_for('static', filename='uploads/' ~ val) -}}
+    {%- endif -%}
   {%- endif -%}
 {%- endmacro %}
