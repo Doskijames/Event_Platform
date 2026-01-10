@@ -145,19 +145,59 @@ def _drive_uc_view(file_id: str) -> str:
     return f"https://drive.google.com/uc?export=view&id={file_id}"
 
 
+def _looks_like_drive_file_id(s: str) -> bool:
+    """
+    Heuristic: DB may contain a raw Drive file_id (legacy). If so, convert to Drive URL.
+    Avoid treating normal filenames like *.jpg as IDs.
+    """
+    v = (s or "").strip()
+    if not v:
+        return False
+    if _is_url(v):
+        return False
+    if "/" in v or "\\" in v:
+        return False
+    if "." in v:  # local filename usually has extension
+        return False
+    if len(v) < 18 or len(v) > 200:
+        return False
+    for ch in v:
+        if not (ch.isalnum() or ch in "-_"):
+            return False
+    return True
+
+
+def _local_upload_exists(filename: str) -> bool:
+    """Return True if a legacy local upload still exists on disk."""
+    fn = (filename or "").strip()
+    if not fn or _is_url(fn) or _looks_like_drive_file_id(fn):
+        return False
+    try:
+        base = current_app.config.get("UPLOAD_FOLDER") or ""
+        if not base:
+            return False
+        return os.path.exists(os.path.join(base, fn))
+    except Exception:
+        return False
+
+
 def media_url(stored_value: str):
     """
     If stored_value is already a URL (Drive), return it.
-    Else treat it as a local filename under /static/uploads/.
+    If it's a raw Drive file_id (legacy), convert to embed-friendly URL.
+    Else treat it as a local filename under /static/uploads/ (only if file exists).
     """
     v = (stored_value or "").strip()
     if not v:
         return ""
     if _is_url(v):
         return v
-    return url_for("static", filename=f"uploads/{v}")
-
-
+    if _looks_like_drive_file_id(v):
+        return _drive_uc_view(v)
+    if _local_upload_exists(v):
+        return url_for("static", filename=f"uploads/{v}")
+    # File missing (Render filesystem is ephemeral) -> don't show broken image
+    return ""
 def _drive_ok() -> bool:
     """
     True if Drive uploader is available and OAuth env vars are present.
