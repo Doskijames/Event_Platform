@@ -1,4 +1,4 @@
-# photos_routes.py (FULL - OAuth Drive uploads + safe fallback + logging)
+# photos_routes.py (FULL - OAuth Google Drive uploads + safe fallback + logging)
 import os
 import time
 import secrets
@@ -15,7 +15,7 @@ from utils_core import has_event_access, ensure_photos_day_token, now_iso
 from auth_routes import current_user, login_required
 from events_routes import get_event_by_slug, get_event_sections, can_manage_event, allowed_file
 
-# ✅ Drive helpers (OAuth)
+# ✅ Drive helpers (OAuth-based gdrive_storage.py)
 try:
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
@@ -36,31 +36,34 @@ def _public_media_url(stored_value: str):
     - If it's a local filename, return a local URL (legacy support).
     """
     v = (stored_value or "").strip()
-    if not v:
-        return ""
     if _is_url(v):
         return v
+
+    # local fallback (legacy)
     return url_for("static", filename=f"uploads/{v}")
 
 
 def _drive_ok() -> bool:
+    """
+    True if Drive uploader is available and OAuth env vars are present.
+    """
     if upload_file_to_drive is None:
         return False
+
     if callable(drive_enabled):
         try:
             return bool(drive_enabled())
         except Exception:
             return False
 
-    # Fallback check
-    return bool(
-        (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
-        and (
-            (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-            or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
-        )
-        and (os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()
+    # Fallback check if drive_enabled isn't callable
+    has_folder = bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip())
+    has_client_json = bool(
+        (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+        or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
     )
+    has_refresh = bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip())
+    return has_folder and has_client_json and has_refresh
 
 
 def _save_to_storage(file_storage, filename: str) -> str:
@@ -68,31 +71,36 @@ def _save_to_storage(file_storage, filename: str) -> str:
     Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
 
     Returns:
-      - Google Drive public URL (string) ✅ best for Render
+      - Google Drive public URL (string)  ✅ recommended for Render
       - or local filename (fallback)
     """
+    # ---- DIAGNOSTIC LOG ----
     current_app.logger.warning(
         "UPLOAD: drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
         _drive_ok(),
         bool(upload_file_to_drive),
         bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip() or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
+        bool(
+            (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+            or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
+        ),
         bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
     )
 
     if _drive_ok():
         try:
-            meta = upload_file_to_drive(file_storage, filename=filename, make_public=True)
+            meta = upload_file_to_drive(
+                file_storage,
+                filename=filename,
+                make_public=True,
+            )
             if isinstance(meta, dict):
-                url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
-                if url:
-                    return url
-            # If it doesn't return a URL, treat as failure and fall back
-            raise RuntimeError("Drive upload returned no URL")
+                return (meta.get("download_url") or meta.get("view_url") or "").strip() or filename
+            return filename
         except Exception as e:
             current_app.logger.exception("Drive upload failed; falling back to local save. err=%s", e)
 
-    # Fallback: local save
+    # Fallback: local save (not ideal on Render, but keeps app working)
     save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
     file_storage.save(save_path)
     return filename
@@ -104,12 +112,13 @@ def get_photos(event_id: int, kind: str):
         (event_id, kind)
     ).fetchall() or []
 
+    # Normalize to list[dict] so templates can do p.file_url consistently
     out = []
     for r in rows:
         if isinstance(r, dict):
             rr = dict(r)
         else:
-            rr = {k: r[k] for k in r.keys()}
+            rr = {k: r[k] for k in r.keys()}  # sqlite3.Row -> dict
         rr["file_url"] = _public_media_url(rr.get("file_name", ""))
         out.append(rr)
 
@@ -178,6 +187,7 @@ def register_photo_routes(app):
 
         photos = get_photos(event["id"], "photos")
 
+        # music row
         music_row = get_db().execute(
             "SELECT * FROM event_photos WHERE event_id=? AND kind=? ORDER BY created_at DESC LIMIT 1",
             (event["id"], "photos_music")
@@ -186,7 +196,10 @@ def register_photo_routes(app):
         music_file = None
         music_url = None
         if music_row:
-            music_file = music_row.get("file_name") if isinstance(music_row, dict) else music_row["file_name"]
+            if isinstance(music_row, dict):
+                music_file = music_row.get("file_name")
+            else:
+                music_file = music_row["file_name"]
             music_url = _public_media_url(music_file)
 
         return render_template(
