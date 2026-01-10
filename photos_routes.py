@@ -15,12 +15,31 @@ from utils_core import has_event_access, ensure_photos_day_token, now_iso
 from auth_routes import current_user, login_required
 from events_routes import get_event_by_slug, get_event_sections, can_manage_event, allowed_file
 
-# ✅ Google Drive uploader
+# ✅ Drive helpers (from your gdrive_storage.py)
 try:
-    from gdrive_storage import drive_enabled, upload_file_to_drive
+    from gdrive_storage import drive_enabled, upload_filestorage_to_drive
 except Exception:
     drive_enabled = None
-    upload_file_to_drive = None
+    upload_filestorage_to_drive = None
+
+
+def _ensure_drive_env_aliases():
+    """
+    Support BOTH env naming styles:
+
+    Render-style:
+      - GDRIVE_SERVICE_ACCOUNT_JSON
+      - GDRIVE_FOLDER_ID
+
+    Library-style:
+      - GOOGLE_SERVICE_ACCOUNT_JSON (or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64)
+      - GOOGLE_DRIVE_FOLDER_ID
+    """
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "").strip():
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "").strip()
+
+    if os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() == "" and os.getenv("GDRIVE_FOLDER_ID", "").strip():
+        os.environ["GOOGLE_DRIVE_FOLDER_ID"] = os.getenv("GDRIVE_FOLDER_ID", "").strip()
 
 
 def _is_url(s: str) -> bool:
@@ -28,110 +47,72 @@ def _is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
 
 
-def _looks_like_drive_file_id(s: str) -> bool:
+def _public_media_url(stored_value: str):
     """
-    Heuristic: Drive file IDs are typically long-ish, no slashes, no spaces.
-    """
-    s = (s or "").strip()
-    if not s:
-        return False
-    if "/" in s or " " in s:
-        return False
-    # file ids are usually >= 20 chars, but be lenient
-    return len(s) >= 15
+    Converts what's stored in DB into a usable URL.
 
-
-def _drive_img_url(file_id: str) -> str:
-    """
-    Best for <img src="..."> publicly
-    """
-    fid = (file_id or "").strip()
-    return f"https://drive.google.com/uc?export=view&id={fid}"
-
-
-def _drive_download_url(file_id: str) -> str:
-    fid = (file_id or "").strip()
-    return f"https://drive.google.com/uc?id={fid}&export=download"
-
-
-def _public_media_url(stored_value: str) -> str:
-    """
-    Converts DB value into a usable URL.
-
-    Supported stored formats:
-    - Full URL (https://...) -> returned as-is
-    - Google Drive file_id -> converted into uc?export=view URL
-    - Legacy local filename -> /static/uploads/<name>
+    - If it's already a URL (Google Drive), return it.
+    - If it's a local filename, return a local URL (legacy support).
     """
     v = (stored_value or "").strip()
-    if not v:
-        return ""
-
     if _is_url(v):
         return v
 
-    if _looks_like_drive_file_id(v):
-        return _drive_img_url(v)
-
-    # legacy local uploads
+    # local fallback (legacy)
     return url_for("static", filename=f"uploads/{v}")
 
 
-def _save_to_storage(file, filename: str) -> str:
+def _save_to_storage(file_storage, filename: str) -> str:
     """
     Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
 
     Returns:
-      - Drive file_id (preferred + persistent across deploys)
+      - Google Drive public URL (string)  ✅ recommended for Render
       - or local filename (fallback)
     """
+    _ensure_drive_env_aliases()
+
     drive_ok = (
-        upload_file_to_drive is not None
-        and callable(upload_file_to_drive)
-        and drive_enabled is not None
-        and callable(drive_enabled)
+        drive_enabled is not None
+        and upload_filestorage_to_drive is not None
         and drive_enabled()
     )
 
     if drive_ok:
-        # ✅ Upload to Drive and store the returned Drive file_id
-        return upload_file_to_drive(file, filename)
+        # Upload to Drive and store a public URL in DB
+        meta = upload_filestorage_to_drive(
+            file_storage,
+            filename=filename,
+            make_public=True,
+        )
 
-    # Fallback: local save (will be wiped on Render deploy, but app won't break)
+        # For <img src="..."> and <audio src="...">, a direct link is best.
+        # download_url is usually the most reliable for embedding.
+        return meta.get("download_url") or meta.get("view_url") or meta.get("file_id")
+
+    # Fallback: local save (not ideal on Render, but keeps app working)
     save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
-    file.save(save_path)
+    file_storage.save(save_path)
     return filename
-
-
-def _row_to_dict(r):
-    """
-    Converts sqlite3.Row or dict into a plain dict for templates.
-    """
-    if r is None:
-        return {}
-    if isinstance(r, dict):
-        return dict(r)
-    try:
-        return {k: r[k] for k in r.keys()}
-    except Exception:
-        # last resort
-        try:
-            return dict(r)
-        except Exception:
-            return {"file_name": None}
 
 
 def get_photos(event_id: int, kind: str):
     rows = get_db().execute(
         "SELECT * FROM event_photos WHERE event_id=? AND kind=? ORDER BY created_at DESC",
         (event_id, kind)
-    ).fetchall()
+    ).fetchall() or []
 
+    # Normalize to list[dict] so templates can do p.file_url consistently
     out = []
-    for r in rows or []:
-        rr = _row_to_dict(r)
-        rr["file_url"] = _public_media_url(rr.get("file_name"))
+    for r in rows:
+        if isinstance(r, dict):
+            rr = dict(r)
+        else:
+            # sqlite3.Row -> dict
+            rr = {k: r[k] for k in r.keys()}
+        rr["file_url"] = _public_media_url(rr.get("file_name", ""))
         out.append(rr)
+
     return out
 
 
@@ -164,17 +145,16 @@ def register_photo_routes(app):
             saved = 0
             db = get_db()
 
-            for file in files:
-                if not file or file.filename == "":
+            for f in files:
+                if not f or not f.filename:
                     continue
-                if not allowed_file(file.filename):
+                if not allowed_file(f.filename):
                     continue
 
-                filename = secure_filename(file.filename)
+                filename = secure_filename(f.filename)
                 unique_name = f"{slug}-photos-{secrets.token_hex(6)}-{filename}"
 
-                # ✅ Save to Drive (file_id) or local fallback
-                stored_value = _save_to_storage(file, unique_name)
+                stored_value = _save_to_storage(f, unique_name)
 
                 db.execute(
                     """
@@ -206,17 +186,12 @@ def register_photo_routes(app):
 
         music_file = None
         music_url = None
-        music_download_url = None
         if music_row:
-            mr = _row_to_dict(music_row)
-            music_file = mr.get("file_name")
-            # For audio, prefer download URL for best compatibility
-            if _looks_like_drive_file_id(music_file):
-                music_url = _drive_download_url(music_file)
-                music_download_url = music_url
+            if isinstance(music_row, dict):
+                music_file = music_row.get("file_name")
             else:
-                music_url = _public_media_url(music_file)
-                music_download_url = music_url
+                music_file = music_row["file_name"]
+            music_url = _public_media_url(music_file)
 
         return render_template(
             "event_photos.html",
@@ -229,7 +204,6 @@ def register_photo_routes(app):
             photos=photos,
             music_file=music_file,
             music_url=music_url,
-            music_download_url=music_download_url,
         )
 
     @app.post("/events/<slug>/photos/music")
@@ -255,7 +229,6 @@ def register_photo_routes(app):
 
         filename = secure_filename(f"music_{slug}_{int(time.time())}{ext}")
 
-        # ✅ Save to Drive (file_id) or local fallback
         stored_value = _save_to_storage(f, filename)
 
         db = get_db()
@@ -295,7 +268,7 @@ def register_photo_routes(app):
             ensure_photos_day_token(event["id"])
             settings = db.execute("SELECT * FROM photos_day_settings WHERE event_id=?", (event["id"],)).fetchone()
 
-        token = settings["token"] or ensure_photos_day_token(event["id"])
+        token = (settings["token"] if isinstance(settings, dict) else settings["token"]) or ensure_photos_day_token(event["id"])
 
         if request.method == "POST":
             action = (request.form.get("action") or "").strip()
@@ -330,7 +303,7 @@ def register_photo_routes(app):
         settings = db.execute("SELECT * FROM photos_day_settings WHERE event_id=?", (event["id"],)).fetchone()
         photos = get_photos(event["id"], "photos_day")
 
-        share_url = url_for("photos_day_upload", token=settings["token"], _external=True)
+        share_url = url_for("photos_day_upload", token=(settings["token"] if isinstance(settings, dict) else settings["token"]), _external=True)
 
         return render_template(
             "event_photos_day_admin.html",
@@ -353,23 +326,28 @@ def register_photo_routes(app):
         if not settings:
             return render_template("not_found.html", user=current_user()), 404
 
-        event = db.execute("SELECT * FROM events WHERE id=?", (settings["event_id"],)).fetchone()
+        event_id = settings["event_id"] if isinstance(settings, dict) else settings["event_id"]
+        is_open = settings["is_open"] if isinstance(settings, dict) else settings["is_open"]
+
+        event = db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
         if not event:
             return render_template("not_found.html", user=current_user()), 404
 
-        if int(settings["is_open"]) != 1:
+        if int(is_open) != 1:
             flash("This upload link is currently closed.")
             return redirect(url_for("events"))
 
         u = current_user()
         rsvp = db.execute(
             "SELECT first_name, last_name FROM rsvp_responses WHERE event_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
-            (event["id"], u["id"])
+            (event_id, u["id"])
         ).fetchone()
 
         default_name = ""
         if rsvp:
-            default_name = f"{rsvp['first_name']} {rsvp['last_name']}".strip()
+            first = rsvp["first_name"] if isinstance(rsvp, dict) else rsvp["first_name"]
+            last = rsvp["last_name"] if isinstance(rsvp, dict) else rsvp["last_name"]
+            default_name = f"{first} {last}".strip()
 
         if request.method == "POST":
             uploader_name = (request.form.get("uploader_name") or "").strip()
@@ -383,23 +361,25 @@ def register_photo_routes(app):
                 return redirect(url_for("photos_day_upload", token=token))
 
             saved = 0
-            for file in files:
-                if not file or file.filename == "":
+            slug_val = event["slug"] if isinstance(event, dict) else event["slug"]
+
+            for f in files:
+                if not f or not f.filename:
                     continue
-                if not allowed_file(file.filename):
+                if not allowed_file(f.filename):
                     continue
 
-                filename = secure_filename(file.filename)
-                unique_name = f"{event['slug']}-photosday-{secrets.token_hex(6)}-{filename}"
+                filename = secure_filename(f.filename)
+                unique_name = f"{slug_val}-photosday-{secrets.token_hex(6)}-{filename}"
 
-                stored_value = _save_to_storage(file, unique_name)
+                stored_value = _save_to_storage(f, unique_name)
 
                 db.execute(
                     """
                     INSERT INTO event_photos(event_id, kind, file_name, uploader_user_id, uploader_name, created_at)
                     VALUES (?,?,?,?,?,?)
                     """,
-                    (event["id"], "photos_day", stored_value, u["id"], uploader_name, now_iso())
+                    (event_id, "photos_day", stored_value, u["id"], uploader_name, now_iso())
                 )
                 saved += 1
 
