@@ -1,27 +1,29 @@
-# utils_core.py
 import os
 import re
-import json
 import secrets
 import string
+import json
 from datetime import datetime, timedelta
 from html import escape
 
 # IMPORTANT:
-#   This project supports Postgres via db_core.DB adapter.
-#   Do NOT open sqlite3 connections directly in this file.
-from db_core import get_db, row_get, now_iso
+# Use the SAME DB layer everywhere (SQLite or Postgres), based on DATABASE_URL.
+# Do NOT open a separate sqlite3 connection here, or you'll hit: "no such table: events"
+# when the app is actually running on Postgres.
+from db_core import get_db, row_get
 
 
 # ================= JSON HELPERS =================
 
 def parse_qa_list_json(raw: str):
-    """Parse a JSON-encoded Q&A/Tidbits list.
+    """Safely parse a JSON-encoded Q&A / Tidbits list.
 
-    Supports BOTH:
-      [{"q":"..","a":".."}] and [{"question":"..","answer":".."}]
+    Supports BOTH formats:
+      [{"q":"..","a":".."}]
+      [{"question":"..","answer":".."}]
 
-    Returns: [{"q":"...","a":"..."}]
+    Always returns a list of dicts shaped like:
+      [{"q": "...", "a": "..."}]
     """
     if not raw:
         return []
@@ -43,6 +45,7 @@ def parse_qa_list_json(raw: str):
                 cleaned.append({"q": q, "a": a})
 
         return cleaned
+
     except Exception:
         return []
 
@@ -58,10 +61,13 @@ def slugify(text: str) -> str:
 
 
 def unique_slug(base_text: str, table: str = "events", column: str = "slug") -> str:
-    """Generate a unique slug for the table/column using the current DB backend."""
+    """Generate a unique slug in the current DB (SQLite or Postgres).
+
+    NOTE: Do NOT close the db here. db_core stores the connection on flask.g and
+    it will be closed automatically at teardown.
+    """
     base = slugify(base_text)
     slug = base
-
     db = get_db()
     i = 1
 
@@ -71,11 +77,9 @@ def unique_slug(base_text: str, table: str = "events", column: str = "slug") -> 
             (slug,),
         ).fetchone()
         if not row:
-            break
+            return slug
         i += 1
         slug = f"{base}-{i}"
-
-    return slug
 
 
 # ================= HTML SANITIZATION =================
@@ -129,13 +133,15 @@ def validate_password_policy(password: str):
         return False, "Password must include at least one letter."
     if not re.search(r"\d", password):
         return False, "Password must include at least one number."
-    if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=/\\[\]]", password):
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=/\\\[\]]", password):
         return False, "Password must include at least one special character."
     return True, None
 
 
-# ================= OTP HELPERS (optional) =================
+# ================= OTP HELPERS (legacy) =================
 
+# NOTE: These functions assume an `otps` table exists. If you are using the newer
+# db_core schema (users.otp_hash + password_reset_otps), you may not need them.
 
 def generate_otp():
     return "".join(secrets.choice(string.digits) for _ in range(6))
@@ -183,34 +189,28 @@ def can_resend_otp(user_id, purpose, cooldown=60):
     if not row:
         return True
 
-    try:
-        created_at = row_get(row, "created_at", "")
-        if not created_at:
-            return True
-        return (datetime.utcnow() - datetime.fromisoformat(created_at)).seconds >= cooldown
-    except Exception:
+    created_at = row_get(row, "created_at")
+    if not created_at:
         return True
 
+    return (datetime.utcnow() - datetime.fromisoformat(created_at)).seconds >= cooldown
 
-# ================= EVENT ACCESS HELPERS =================
 
+#===========================================================================================
 
 def has_event_access(event_row, user_row=None):
+    """Determine if a user has access to an event."""
     if not event_row:
         return False
 
-    # Treat missing is_public as public
-    try:
-        if int(row_get(event_row, "is_public", 1) or 1) == 1:
-            return True
-    except Exception:
+    if int(row_get(event_row, "is_public", 1) or 1) == 1:
         return True
 
     if not user_row:
         return False
 
     user_id = row_get(user_row, "id")
-    owner_id = row_get(event_row, "owner_user_id") or row_get(event_row, "user_id")
+    owner_id = row_get(event_row, "user_id")
 
     if user_id and owner_id and int(user_id) == int(owner_id):
         return True
@@ -223,6 +223,10 @@ def has_event_access(event_row, user_row=None):
 
 def event_session_key(event_id):
     return f"event_{int(event_id)}"
+
+
+def now_iso():
+    return datetime.utcnow().isoformat()
 
 
 def ensure_photos_day_token(session_obj, prefix="photos_day"):
@@ -238,15 +242,13 @@ def ensure_photos_day_token(session_obj, prefix="photos_day"):
     return token
 
 
-# ================= AUDIT LOGGING (optional) =================
-
 def log_security_event(user_id, event, ip):
     db = get_db()
     db.execute(
         """
-        INSERT INTO audit_logs (user_id, event, ip_address, created_at)
-        VALUES (?,?,?,?)
+        INSERT INTO audit_logs (user_id, event, ip_address)
+        VALUES (?,?,?)
         """,
-        (user_id, event, ip, now_iso()),
+        (user_id, event, ip),
     )
     db.commit()
