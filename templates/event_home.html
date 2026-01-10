@@ -7,8 +7,7 @@
 
   {% if section.image %}
     <img class="joy-hero-img"
-         src="{{ media_url(section.image) }}"
-         alt="Event hero image">
+         src="{{ media_url(section['image'] or event['cover_image']) }}" alt="Event hero image">
   {% else %}
     <div class="joy-hero-placeholder">
       <div>
