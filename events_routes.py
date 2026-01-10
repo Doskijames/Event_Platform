@@ -12,11 +12,13 @@
 
 import os
 import secrets
+import re
+import io
 from datetime import datetime, timezone, datetime as dt_cls
 
 from flask import (
     render_template, request, redirect, url_for,
-    session, flash, abort, current_app, Response
+    session, flash, abort, current_app, make_response, Response
 )
 from werkzeug.utils import secure_filename
 
@@ -137,29 +139,6 @@ def unique_custom_section_key(event_id: int, title: str, prefix: str) -> str:
     return f"{key}-{secrets.token_hex(3)}"
 
 
-def _extract_drive_file_id(v: str) -> str:
-    """Extract Drive file_id from common URL formats or from 'gdrive:<id>'."""
-    s = (v or "").strip()
-    if not s:
-        return ""
-    if s.startswith("gdrive:"):
-        return s.split("gdrive:", 1)[1].strip()
-
-    low = s.lower()
-    if "id=" in low:
-        try:
-            part = s.split("id=", 1)[1]
-            return part.split("&", 1)[0].strip()
-        except Exception:
-            return ""
-    if "/d/" in low:
-        try:
-            part = s.split("/d/", 1)[1]
-            return part.split("/", 1)[0].strip()
-        except Exception:
-            return ""
-    return ""
-
 def _is_url(s: str) -> bool:
     s = (s or "").strip().lower()
     return s.startswith("http://") or s.startswith("https://")
@@ -191,6 +170,30 @@ def _looks_like_drive_file_id(s: str) -> bool:
     return True
 
 
+def _extract_drive_file_id(value: str) -> str:
+    """Extract Drive file_id from common URL formats, or return ''."""
+    v = (value or "").strip()
+    if not v:
+        return ""
+
+    # Querystring patterns: ...?id=<ID> or ...&id=<ID>
+    m = re.search(r"(?:\?|&)id=([A-Za-z0-9_-]{10,})", v)
+    if m:
+        return m.group(1)
+
+    # /file/d/<ID>/...
+    m = re.search(r"/file/d/([A-Za-z0-9_-]{10,})", v)
+    if m:
+        return m.group(1)
+
+    # open?id=<ID>
+    m = re.search(r"open\?id=([A-Za-z0-9_-]{10,})", v)
+    if m:
+        return m.group(1)
+
+    return ""
+
+
 def _local_upload_exists(filename: str) -> bool:
     """Return True if a legacy local upload still exists on disk."""
     fn = (filename or "").strip()
@@ -205,28 +208,42 @@ def _local_upload_exists(filename: str) -> bool:
         return False
 
 
-def media_url(stored_value: str):
-    """
-    Convert DB-stored media refs to a URL.
-
-    We proxy Drive files through /media/drive/<id> so images load reliably even
-    if your site has a strict Content-Security-Policy that blocks external hosts.
-    """
-    v = (stored_value or "").strip()
+def resolve_media_url(value: str) -> str:
+    """Return a browser-friendly URL for media stored as local filenames or Drive URLs/IDs."""
+    v = (value or "").strip()
     if not v:
         return ""
 
-    fid = _extract_drive_file_id(v)
-    if fid:
-        return url_for("drive_media", file_id=fid)
+    # If it's already a URL, normalize Drive links into our proxy where possible.
+    if _is_url(v):
+        file_id = _extract_drive_file_id(v)
+        if file_id and _looks_like_drive_file_id(file_id):
+            try:
+                return url_for("drive_media", file_id=file_id)
+            except Exception:
+                # If url_for isn't available (very early init), fall back to direct view URL.
+                return drive_file_embed_url(file_id)
+        return v
 
+    # If it's a bare Drive file id
     if _looks_like_drive_file_id(v):
-        return url_for("drive_media", file_id=v)
+        try:
+            return url_for("drive_media", file_id=v)
+        except Exception:
+            return drive_file_embed_url(v)
 
-    if _local_upload_exists(v):
+    # Otherwise treat it as a local filename under static/uploads
+    try:
         return url_for("static", filename=f"uploads/{v}")
+    except Exception:
+        return f"/static/uploads/{v}"
 
-    return ""
+def _drive_ok() -> bool:
+    """
+    True if Drive uploader is available and OAuth env vars are present.
+    """
+    if upload_file_to_drive is None:
+        return False
 
     if callable(drive_enabled):
         try:
@@ -261,42 +278,14 @@ def _next_sort_order(event_id: int) -> int:
 
 
 def _drive_upload_image_and_get_url(file_storage, unique_name: str) -> str:
-    """Upload to Drive and return a DB-safe stored value ("gdrive:<file_id>")."""
+    """
+    Upload to Drive and return a URL suitable for <img src="...">.
+
+    Works with both possible upload_file_to_drive return shapes:
+      - dict: {"file_id","view_url","download_url"}
+      - str:  URL OR "file_id"
+    """
     if not _drive_ok():
-        return ""
-
-    current_app.logger.warning(
-        "UPLOAD(image): drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
-        True,
-        bool(upload_file_to_drive),
-        bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip() or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
-    )
-
-    try:
-        res = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
-
-        if isinstance(res, dict):
-            fid = (res.get("file_id") or "").strip()
-            if not fid:
-                fid = _extract_drive_file_id((res.get("download_url") or "").strip()) or _extract_drive_file_id((res.get("view_url") or "").strip())
-            if fid:
-                current_app.logger.warning("Drive upload ok. file_id=%s", fid)
-                return f"gdrive:{fid}"
-            return ""
-
-        s = str(res or "").strip()
-        if not s:
-            return ""
-        fid = _extract_drive_file_id(s) or (s if _looks_like_drive_file_id(s) else "")
-        if fid:
-            current_app.logger.warning("Drive upload ok (legacy). file_id=%s", fid)
-            return f"gdrive:{fid}"
-        return ""
-
-    except Exception as e:
-        current_app.logger.exception("Drive upload failed in events_routes. err=%s", e)
         return ""
 
     current_app.logger.warning(
@@ -344,43 +333,43 @@ def register_event_routes(app):
     # Make media_url callable in ALL templates
     @app.context_processor
     def _inject_media_url():
-        return {"media_url": media_url}
+        return {"resolve_media_url": resolve_media_url}
 
-    # -----------------------------
-    # Drive media proxy (same-origin)
-    # -----------------------------
-    @app.get("/media/drive/<file_id>", endpoint="drive_media")
-    def drive_media(file_id: str):
-        """Streams a Google Drive file back to the browser from *our* domain."""
-        if get_drive_service is None:
-            abort(404)
+@app.get("/media/drive/<file_id>")
+def drive_media(file_id: str):
+    """Proxy Drive media through this app so <img> always works."""
+    fid = (file_id or "").strip()
+    if not fid or not _looks_like_drive_file_id(fid):
+        abort(404)
 
-        fid = (file_id or "").strip()
-        if not fid:
-            abort(404)
+    if not drive_enabled() or get_drive_service is None:
+        # Fallback to direct link if Drive isn't configured
+        return redirect(drive_file_embed_url(fid))
 
-        try:
-            service = get_drive_service()
-            meta = service.files().get(fileId=fid, fields="mimeType,name").execute()
-            mime = (meta.get("mimeType") or "application/octet-stream").strip()
+    try:
+        service = get_drive_service()
+        meta = service.files().get(fileId=fid, fields="mimeType,name").execute()
+        mime = (meta or {}).get("mimeType") or "application/octet-stream"
 
-            import io
-            from googleapiclient.http import MediaIoBaseDownload
+        # Stream download to memory (images are small)
+        from googleapiclient.http import MediaIoBaseDownload
 
-            fh = io.BytesIO()
-            req = service.files().get_media(fileId=fid)
-            dl = MediaIoBaseDownload(fh, req)
-            done = False
-            while not done:
-                _, done = dl.next_chunk()
+        request = service.files().get_media(fileId=fid)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _status, done = downloader.next_chunk()
 
-            resp = Response(fh.getvalue(), mimetype=mime)
-            resp.headers["Cache-Control"] = "public, max-age=3600"
-            resp.headers["X-Content-Type-Options"] = "nosniff"
-            return resp
-        except Exception as e:
-            current_app.logger.exception("Drive proxy failed. file_id=%s err=%s", fid, e)
-            abort(404)
+        data = fh.getvalue()
+        resp = make_response(data)
+        resp.headers["Content-Type"] = mime
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+    except Exception as e:
+        current_app.logger.exception("Drive proxy failed for %s: %s", fid, e)
+        abort(404)
+
 
 
     @app.route("/events")
