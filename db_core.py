@@ -427,6 +427,58 @@ def _create_schema_sqlite(db: DB):
         """
     )
 
+
+        db.execute(
+
+            """
+
+            CREATE TABLE IF NOT EXISTS otps (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                user_id INTEGER NOT NULL,
+
+                otp_code TEXT NOT NULL,
+
+                purpose TEXT NOT NULL,
+
+                expires_at TEXT NOT NULL,
+
+                created_at TEXT NOT NULL,
+
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+
+            );
+
+            """
+
+        )
+
+
+        db.execute(
+
+            """
+
+            CREATE TABLE IF NOT EXISTS audit_logs (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                user_id INTEGER,
+
+                event TEXT NOT NULL,
+
+                ip_address TEXT NOT NULL,
+
+                created_at TEXT NOT NULL DEFAULT '',
+
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+
+            );
+
+            """
+
+        )
+
     db.commit()
 
 
