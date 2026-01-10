@@ -1,4 +1,4 @@
-# events_routes.py (FULL - corrected: Drive URL storage + media_url helper + add_section sort fix + delete event)
+# events_routes.py (FULL - Drive URL storage + media_url helper + base64-first env aliases + logging + add_section sort fix + delete event)
 import os
 import secrets
 from datetime import datetime, timezone, datetime as dt_cls
@@ -9,8 +9,9 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-# --- Google Drive integration (supports BOTH env styles: GOOGLE_* and GDRIVE_*) ---
+# --- Google Drive integration ---
 try:
+    # Expected to expose: drive_enabled(), upload_file_to_drive(...)
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
@@ -22,7 +23,6 @@ from utils_core import (
     parse_qa_list_json, event_session_key
 )
 from auth_routes import current_user, login_required
-
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
@@ -46,7 +46,6 @@ def get_event_sections(event_id: int):
         "SELECT * FROM sections WHERE event_id=? ORDER BY sort_order ASC, id ASC",
         (event_id,)
     ).fetchall()
-    # Works for sqlite Row and postgres dict rows
     return {r["section_key"]: r for r in rows}
 
 
@@ -134,7 +133,7 @@ def _is_url(s: str) -> bool:
 
 
 def _drive_image_url(file_id: str) -> str:
-    # Best for <img src="..."> embedding
+    # Embed-friendly for <img src="...">
     return f"https://drive.google.com/uc?export=view&id={file_id}"
 
 
@@ -153,39 +152,55 @@ def media_url(stored_value: str):
 
 def _ensure_drive_env_aliases():
     """
-    Your gdrive_storage.py expects:
-      GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
-      GOOGLE_DRIVE_FOLDER_ID
+    Base64-first alias mapping (safe on Render).
 
-    But you said Render env is set as:
-      GDRIVE_SERVICE_ACCOUNT_JSON
-      GDRIVE_FOLDER_ID
+    gdrive_storage.py expects:
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended) OR GOOGLE_SERVICE_ACCOUNT_JSON
+      - GOOGLE_DRIVE_FOLDER_ID
 
-    This maps GDRIVE_* -> GOOGLE_* at runtime so drive_enabled() works.
+    We support these aliases too:
+      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 / GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON
+      - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64 / GDRIVE_SERVICE_ACCOUNT_JSON
+      - GDRIVE_FOLDER_ID
     """
-    # Map service account JSON
-    if os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON") and not os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "")
+    # ---- Base64 creds aliases (SAFE) ----
+    if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip():
+        v = (os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
+        if v:
+            os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = v
 
-    if os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64") and not os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"):
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "")
+    if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip():
+        v = (os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
+        if v:
+            os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = v
 
-    # Map folder id
-    if os.getenv("GDRIVE_FOLDER_ID") and not os.getenv("GOOGLE_DRIVE_FOLDER_ID"):
-        os.environ["GOOGLE_DRIVE_FOLDER_ID"] = os.getenv("GDRIVE_FOLDER_ID", "")
+    # ---- Folder ID alias ----
+    if not (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip():
+        v = (os.getenv("GDRIVE_FOLDER_ID") or "").strip()
+        if v:
+            os.environ["GOOGLE_DRIVE_FOLDER_ID"] = v
+
+    # ---- Optional RAW fallback (only if no base64 exists) ----
+    # Recommended: remove RAW vars from Render entirely, but keep this for compatibility.
+    if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip():
+        if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip():
+            v = (os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON") or "").strip()
+            if not v:
+                v = (os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON") or "").strip()
+            if v:
+                os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = v
 
 
 def _drive_ok() -> bool:
     """
-    True if Drive uploader is available and env vars are present
-    (supports both GOOGLE_* and GDRIVE_* naming).
+    True if Drive uploader is available and env vars are present.
+    (supports both GOOGLE_* and alias naming)
     """
     if upload_file_to_drive is None:
         return False
 
     _ensure_drive_env_aliases()
 
-    # If gdrive_storage exposes drive_enabled, use it; else do a simple check.
     if callable(drive_enabled):
         try:
             return bool(drive_enabled())
@@ -193,10 +208,10 @@ def _drive_ok() -> bool:
             return False
 
     has_creds = bool(
-        os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-        or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
+        (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
+        or (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
     )
-    has_folder = bool(os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip())
+    has_folder = bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip())
     return has_creds and has_folder
 
 
@@ -219,12 +234,58 @@ def _next_sort_order(event_id: int) -> int:
     return m + 10
 
 
+def _drive_upload_image_and_get_url(file_storage, unique_name: str) -> str:
+    """
+    Upload to Drive and return a URL suitable for <img src="...">.
+    Works with both possible upload_file_to_drive return shapes:
+      - dict: {"file_id","view_url","download_url"}
+      - str:  "file_id"
+    """
+    if not _drive_ok():
+        return ""
+
+    # Diagnostic log (helps confirm env + function availability)
+    current_app.logger.warning(
+        "UPLOAD(image): drive_enabled=%s upload_func=%s has_folder=%s has_base64=%s has_raw=%s",
+        (drive_enabled() if callable(drive_enabled) else None),
+        bool(upload_file_to_drive),
+        bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
+        bool((os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()),
+        bool((os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()),
+    )
+
+    try:
+        res = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
+
+        # New/Recommended: dict response
+        if isinstance(res, dict):
+            url = (res.get("download_url") or "").strip() or (res.get("view_url") or "").strip()
+            if url:
+                return url
+
+            file_id = (res.get("file_id") or "").strip()
+            if file_id:
+                return _drive_image_url(file_id)
+            return ""
+
+        # Legacy: file_id string
+        file_id = str(res or "").strip()
+        if file_id:
+            return _drive_image_url(file_id)
+
+        return ""
+
+    except Exception as e:
+        current_app.logger.exception("Drive upload failed in events_routes. err=%s", e)
+        return ""
+
+
 # -----------------------------
 # Routes
 # -----------------------------
 def register_event_routes(app):
 
-    # ✅ Make media_url callable in ALL templates (works even if you forget to import macro)
+    # Make media_url callable in ALL templates
     @app.context_processor
     def _inject_media_url():
         return {"media_url": media_url}
@@ -289,7 +350,7 @@ def register_event_routes(app):
         if request.method == "POST":
             passcode = (request.form.get("passcode") or "").strip()
             if passcode == (event.get("passcode") or event["passcode"]):
-                session[event_session_key(event["id"])] = True
+                session[event_session_key(event["id"]))] = True
                 return redirect(url_for("event_section", slug=slug, section_key="home"))
             flash("Incorrect passcode. Please try again.")
 
@@ -319,7 +380,6 @@ def register_event_routes(app):
         db = get_db()
         event_id = int(event["id"])
 
-        # Best-effort cleanup of child rows (safe if a table doesn't exist)
         child_deletes = [
             ("DELETE FROM sections WHERE event_id=?", (event_id,)),
             ("DELETE FROM event_photos WHERE event_id=?", (event_id,)),
@@ -368,23 +428,18 @@ def register_event_routes(app):
         filename = secure_filename(file.filename)
         unique_name = f"{slug}-{section_key}-{secrets.token_hex(6)}-{filename}"
 
-        stored_value = ""
-        if _drive_ok():
-            try:
-                res = upload_file_to_drive(file, filename=unique_name, make_public=True)
-                file_id = (res or {}).get("file_id", "")
-                if file_id:
-                    stored_value = _drive_image_url(file_id)
-                else:
-                    # fallback: if wrapper returns a view_url/download_url only
-                    stored_value = (res or {}).get("download_url") or (res or {}).get("view_url") or ""
-            except Exception:
-                stored_value = ""
+        # Try Drive first
+        stored_value = _drive_upload_image_and_get_url(file, unique_name)
 
+        # Local fallback (may disappear on Render redeploy)
         if not stored_value:
-            # local fallback (may disappear on Render redeploy)
-            file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name))
-            stored_value = unique_name
+            try:
+                file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name))
+                stored_value = unique_name
+            except Exception as e:
+                current_app.logger.exception("Local save failed in upload_section_image. err=%s", e)
+                flash("Upload failed.")
+                return redirect(url_for("event_section", slug=slug, section_key=section_key))
 
         db = get_db()
         db.execute(
@@ -857,13 +912,6 @@ def register_event_routes(app):
     @app.route("/events/<slug>/sections/sort", methods=["POST"])
     @login_required
     def sections_reorder(slug):
-        """
-        Persist section order from the drag-and-drop UI.
-
-        Accepts multiple payload shapes for compatibility:
-          - JSON: {"order": ["home","story",...]} or {"keys":[...]} or {"section_keys":[...]}
-          - form: order=comma,separated or order[]=key1&order[]=key2
-        """
         event = get_event_by_slug(slug)
         if not event:
             abort(404)
@@ -880,6 +928,7 @@ def register_event_routes(app):
                     break
             if order is None and isinstance(data.get("order"), str):
                 order = [x.strip() for x in data.get("order").split(",") if x.strip()]
+
         if order is None:
             order = request.form.getlist("order[]") or request.form.getlist("order") or []
             if len(order) == 1 and isinstance(order[0], str) and "," in order[0]:
@@ -1042,7 +1091,6 @@ def register_event_routes(app):
             flash("Section not found.")
             return redirect(url_for("event_section", slug=slug, section_key="home"))
 
-        # If image is local file, attempt delete. If it's a URL (Drive), do nothing.
         try:
             img = (sec["image"] or "").strip()
             if img and (not _is_url(img)):
@@ -1290,7 +1338,6 @@ def register_event_routes(app):
         )
 
     # -------- public single-page scroll view --------
-    # ✅ endpoint name ensures url_for("event_public_all_sections") always works
     @app.route("/events/<slug>/all", endpoint="event_public_all_sections")
     def event_public_all_sections(slug):
         event = get_event_by_slug(slug)
@@ -1362,7 +1409,7 @@ def register_event_routes(app):
             public_sections.append({
                 "key": key,
                 "title": title,
-                "image": img,   # this can be url OR local filename
+                "image": img,   # url OR local filename
                 "kind": kind,
                 "html": html,
                 "items": items,
@@ -1375,7 +1422,7 @@ def register_event_routes(app):
             sections=sections,
             public_sections=public_sections,
             is_admin=False,
-            can_manage=False,     # ✅ prevents template assumptions breaking
+            can_manage=False,
             view_as_user=False,
             public_single=True,
         )
