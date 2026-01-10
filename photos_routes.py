@@ -20,7 +20,7 @@ try:
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
-    upload_filestorage_to_drive = None
+    upload_file_to_drive = None
 
 
 def _ensure_drive_env_aliases():
@@ -74,13 +74,13 @@ def _save_to_storage(file_storage, filename: str) -> str:
 
     drive_ok = (
         drive_enabled is not None
-        and upload_filestorage_to_drive is not None
+        and upload_file_to_drive is not None
         and drive_enabled()
     )
 
     if drive_ok:
         # Upload to Drive and store a public URL in DB
-        meta = upload_filestorage_to_drive(
+        meta = upload_file_to_drive(
             file_storage,
             filename=filename,
             make_public=True,
