@@ -1,4 +1,4 @@
-# photos_routes.py (FULL - Google Drive uploads + safe fallback)
+# photos_routes.py (FULL - Google Drive uploads + safe fallback + logging)
 import os
 import time
 import secrets
@@ -31,13 +31,29 @@ def _ensure_drive_env_aliases():
       - GDRIVE_SERVICE_ACCOUNT_JSON
       - GDRIVE_FOLDER_ID
 
-    Library-style:
+    Your style (as you mentioned):
+      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON
+      - GOOGLE_DRIVE_FOLDER_ID
+
+    Library-style expected by gdrive_storage.py:
       - GOOGLE_SERVICE_ACCOUNT_JSON (or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64)
       - GOOGLE_DRIVE_FOLDER_ID
     """
+    # --- service account JSON aliases ---
     if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "").strip():
         os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "").strip()
 
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() == "" and os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", "").strip():
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", "").strip()
+
+    # Optional: base64 alias if you ever use it
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
+
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
+
+    # --- folder id aliases ---
     if os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() == "" and os.getenv("GDRIVE_FOLDER_ID", "").strip():
         os.environ["GOOGLE_DRIVE_FOLDER_ID"] = os.getenv("GDRIVE_FOLDER_ID", "").strip()
 
@@ -72,23 +88,37 @@ def _save_to_storage(file_storage, filename: str) -> str:
     """
     _ensure_drive_env_aliases()
 
+    # ---- DIAGNOSTIC LOG (what you requested) ----
+    current_app.logger.warning(
+        "UPLOAD: drive_enabled=%s upload_func=%s has_folder=%s has_json=%s",
+        (drive_enabled() if callable(drive_enabled) else None),
+        bool(upload_file_to_drive),
+        bool(os.getenv("GOOGLE_DRIVE_FOLDER_ID")),
+        bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")),
+    )
+
     drive_ok = (
         drive_enabled is not None
         and upload_file_to_drive is not None
+        and callable(drive_enabled)
         and drive_enabled()
     )
 
     if drive_ok:
-        # Upload to Drive and store a public URL in DB
-        meta = upload_file_to_drive(
-            file_storage,
-            filename=filename,
-            make_public=True,
-        )
+        try:
+            # Upload to Drive and store a public URL in DB
+            meta = upload_file_to_drive(
+                file_storage,
+                filename=filename,
+                make_public=True,
+            )
 
-        # For <img src="..."> and <audio src="...">, a direct link is best.
-        # download_url is usually the most reliable for embedding.
-        return meta.get("download_url") or meta.get("view_url") or meta.get("file_id")
+            # For <img src="..."> and <audio src="...">, a direct link is best.
+            # download_url is usually the most reliable for embedding.
+            return meta.get("download_url") or meta.get("view_url") or meta.get("file_id")
+        except Exception as e:
+            # If Drive upload fails, log it and fall back to local (keeps app working)
+            current_app.logger.exception("Drive upload failed; falling back to local save. err=%s", e)
 
     # Fallback: local save (not ideal on Render, but keeps app working)
     save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
@@ -303,7 +333,11 @@ def register_photo_routes(app):
         settings = db.execute("SELECT * FROM photos_day_settings WHERE event_id=?", (event["id"],)).fetchone()
         photos = get_photos(event["id"], "photos_day")
 
-        share_url = url_for("photos_day_upload", token=(settings["token"] if isinstance(settings, dict) else settings["token"]), _external=True)
+        share_url = url_for(
+            "photos_day_upload",
+            token=(settings["token"] if isinstance(settings, dict) else settings["token"]),
+            _external=True
+        )
 
         return render_template(
             "event_photos_day_admin.html",
@@ -311,7 +345,6 @@ def register_photo_routes(app):
             event=event,
             sections=sections,
             section_key=section_key,
-            section=section,
             is_admin=True,
             settings=settings,
             share_url=share_url,
