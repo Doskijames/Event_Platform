@@ -31,29 +31,28 @@ def _load_service_account_info() -> Dict[str, Any]:
     """
     Loads Google service account JSON from env.
 
-    Supported (choose ONE):
-      - GOOGLE_SERVICE_ACCOUNT_JSON: raw JSON string
-      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: base64 JSON string
+    Recommended on Render:
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (or GDRIVE_SERVICE_ACCOUNT_JSON_BASE64)
 
-    Also supports legacy/alternate names:
+    Supported:
+      - GOOGLE_SERVICE_ACCOUNT_JSON
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
       - GDRIVE_SERVICE_ACCOUNT_JSON
       - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64
+      - (optional alias) GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON / _BASE64
 
-    Notes:
-      - We do NOT try to "fix" raw JSON beyond \\n -> \n
-      - Base64 is recommended on Render to avoid newline/control character issues.
+    IMPORTANT:
+      - Do NOT replace \\n with real newlines before json.loads()
+        (that causes "Invalid control character" JSON errors).
     """
     raw_b64 = _env_first(
         "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
         "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
-        # optional aliases some people use:
         "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
-        "GOOGLE_SERVICE_ACCOUNT_B64",
     )
     raw = _env_first(
         "GOOGLE_SERVICE_ACCOUNT_JSON",
         "GDRIVE_SERVICE_ACCOUNT_JSON",
-        # optional alias some people use:
         "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
     )
 
@@ -66,22 +65,28 @@ def _load_service_account_info() -> Dict[str, Any]:
     if not raw:
         raise RuntimeError(
             "Missing Google service account credentials. "
-            "Set GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 "
-            "or GDRIVE_SERVICE_ACCOUNT_JSON / GDRIVE_SERVICE_ACCOUNT_JSON_BASE64."
+            "Set GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended) or GOOGLE_SERVICE_ACCOUNT_JSON, "
+            "or the GDRIVE_* equivalents."
         )
 
-    # Common ENV escaping: private_key sometimes has literal '\n'
-    raw_fixed = raw.replace("\\n", "\n")
-
+    # Parse JSON AS-IS (no newline replacements here!)
     try:
-        info = json.loads(raw_fixed)
-    except Exception as e:
-        raise RuntimeError(f"Service account JSON is not valid JSON: {e}")
+        info = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            "Service account JSON is not valid JSON. "
+            "If you pasted the JSON into an env var, it may have been modified. "
+            "Use GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 instead. "
+            f"Original error: {e}"
+        ) from e
 
-    # Ensure private_key newlines are correct even if JSON parsed with \\n literals
+    # Normalize private_key only if it's double-escaped (contains literal \\n)
     pk = info.get("private_key")
     if isinstance(pk, str):
-        info["private_key"] = pk.replace("\\n", "\n")
+        # If pk already has real newlines, leave it.
+        # If pk contains literal backslash-n sequences, convert them.
+        if "\\n" in pk and "\n" not in pk:
+            info["private_key"] = pk.replace("\\n", "\n")
 
     return info
 
@@ -90,12 +95,12 @@ def drive_enabled() -> bool:
     """True when Drive integration is configured."""
     has_creds = bool(
         _env_first(
-            "GOOGLE_SERVICE_ACCOUNT_JSON",
-            "GDRIVE_SERVICE_ACCOUNT_JSON",
             "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
             "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
-            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
             "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
+            "GOOGLE_SERVICE_ACCOUNT_JSON",
+            "GDRIVE_SERVICE_ACCOUNT_JSON",
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
         )
     )
     has_folder = bool(_drive_folder_id())
@@ -103,22 +108,18 @@ def drive_enabled() -> bool:
 
 
 def get_drive_service():
-    """Builds a Google Drive API service using service account credentials."""
+    """Build Drive API service using service account creds."""
     info = _load_service_account_info()
     creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def drive_file_view_url(file_id: str) -> str:
-    """Human-friendly view page."""
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 
 def drive_file_embed_url(file_id: str) -> str:
-    """
-    Direct-ish link good for <img src="...">.
-    (Drive can still apply some restrictions depending on settings, but this is the usual best.)
-    """
+    # Usually best for <img src="...">
     return f"https://drive.google.com/uc?export=view&id={file_id}"
 
 
@@ -132,18 +133,17 @@ def upload_file_to_drive(
     """
     Uploads a Flask FileStorage to Google Drive.
 
-    Returns a dict (so your routes can meta.get(...)):
+    Returns:
       {
         "file_id": "...",
         "view_url": "...",
-        "download_url": "..."   # embed-friendly URL
+        "download_url": "..."   # embed-friendly
       }
 
-    Notes:
-    - folder_id defaults to GOOGLE_DRIVE_FOLDER_ID (or GDRIVE_FOLDER_ID)
-    - If make_public=True, sets "anyone with the link can read"
-    - If you get 404 "File not found: <folderId>", the folder id is wrong OR
-      the service account lacks permission to that folder (share it with client_email).
+    Common 404 causes:
+      - folder_id is wrong (not a folder id)
+      - service account doesn't have permission to that folder
+        (share the folder with the service account's client_email as Editor)
     """
     if file_storage is None:
         raise ValueError("file_storage is None")
@@ -154,12 +154,15 @@ def upload_file_to_drive(
     if not folder_id:
         raise RuntimeError("Missing Drive folder ID. Set GOOGLE_DRIVE_FOLDER_ID or GDRIVE_FOLDER_ID.")
 
-    # Read file bytes (and reset stream so Flask/Werkzeug won't break later)
+    # Read bytes & reset stream for possible fallback save
     data = file_storage.read()
     try:
         file_storage.stream.seek(0)
     except Exception:
-        pass
+        try:
+            file_storage.seek(0)
+        except Exception:
+            pass
 
     mime_type = getattr(file_storage, "mimetype", None) or "application/octet-stream"
 
@@ -175,8 +178,9 @@ def upload_file_to_drive(
             supportsAllDrives=True,
         ).execute()
     except HttpError as e:
-        # Keep message helpful for the most common cause: wrong folder id / no permission
-        raise RuntimeError(f"Drive upload failed (create). Check folder_id permission. {e}") from e
+        raise RuntimeError(
+            f"Drive upload failed. Check folder_id and folder permissions for the service account. {e}"
+        ) from e
 
     file_id = created["id"]
 
@@ -189,10 +193,7 @@ def upload_file_to_drive(
                 supportsAllDrives=True,
             ).execute()
         except HttpError as e:
-            # Upload succeeded, but permission setting failed (still return links)
-            # You can decide if you want to raise instead.
-            # For now: raise so you notice misconfig.
-            raise RuntimeError(f"Drive upload succeeded but permission set failed. {e}") from e
+            raise RuntimeError(f"Uploaded file but failed to set public permission: {e}") from e
 
     return {
         "file_id": file_id,
