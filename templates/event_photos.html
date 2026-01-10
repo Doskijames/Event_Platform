@@ -1,4 +1,5 @@
 {% extends "event_base.html" %}
+{% from "_media.html" import media_url %}
 {% block event_content %}
 <div class="container">
   <div class="card">
@@ -40,7 +41,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
             <div><strong>Background music</strong></div>
             <audio id="bgAudio" controls loop preload="metadata" style="width:min(520px,100%);">
-              <source src="{{ url_for('static', filename='uploads/' ~ music_file) }}">
+              <source src="{{ media_url(music_file) }}">
             </audio>
           </div>
           <p class="muted" style="margin:8px 0 0;">If it doesn’t auto-play, press play once.</p>
@@ -52,7 +53,7 @@
           <div class="slide-wrap">
             {% for p in photos %}
               <img class="slide {% if loop.first %}active{% endif %}"
-                   src="{{ url_for('static', filename='uploads/' ~ p.file_name) }}"
+                   src="{{ media_url(p.file_name) }}"
                    alt="Photo {{ loop.index }}">
             {% endfor %}
           </div>
@@ -67,7 +68,7 @@
         <div class="grid">
           {% for p in photos %}
             <button class="thumb" type="button" data-idx="{{ loop.index0 }}">
-              <img src="{{ url_for('static', filename='uploads/' ~ p.file_name) }}" alt="thumb {{ loop.index }}">
+              <img src="{{ media_url(p.file_name) }}" alt="thumb {{ loop.index }}">
             </button>
           {% endfor %}
         </div>

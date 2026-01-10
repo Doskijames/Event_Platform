@@ -1,4 +1,5 @@
 {% extends "event_base.html" %}
+{% from "_media.html" import media_url %}
 {% block event_content %}
 
 <div class="section-card">
@@ -7,7 +8,7 @@
 
   {% if section.image %}
     <img class="section-image"
-         src="{{ url_for('static', filename='uploads/' + section.image) }}"
+         src="{{ media_url(section.image) }}"
          alt="{{ section.title }}">
   {% endif %}
 

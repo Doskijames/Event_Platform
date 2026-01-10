@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_media.html" import media_url %}
 {% block content %}
 
 <div class="container">
@@ -37,8 +38,7 @@
       <a class="event-card" href="{{ url_for('event_gate', slug=e.slug) }}">
         <div class="event-cover">
           {% if e.cover_image %}
-            <img class="event-cover-bg" src="{{ url_for('static', filename='uploads/' + e.cover_image) }}" alt="" aria-hidden="true">
-            <img class="event-cover-fg" src="{{ url_for('static', filename='uploads/' + e.cover_image) }}" alt="Event cover">
+            <img src="{{ media_url(e.cover_image) }}" alt="Event cover">
           {% else %}
             <div class="event-cover-placeholder">No Cover Photo</div>
           {% endif %}

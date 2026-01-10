@@ -1,4 +1,5 @@
 {% extends "event_base.html" %}
+{% from "_media.html" import media_url %}
 {% block event_content %}
 
 <!-- ===== Public Single Page (non-admin/non-owner) ===== -->
@@ -42,22 +43,15 @@
   <!-- RIGHT: vertical scrolling sections (THIS is the scroller) -->
   <div class="joy-single-right" id="joyScroll">
     {% for s in public_sections %}
-      {% set img_src = (url_for('static', filename='uploads/' ~ s.image) if s.image else (url_for('static', filename='uploads/' ~ event.cover_image) if event.cover_image else '')) %}
       <section
         id="sec-{{ s.key }}"
         class="joy-section"
         data-key="{{ s.key }}"
-        data-img="{{ img_src }}"
+        data-img=\"{{ (media_url(s.image) if s.image else (media_url(event.cover_image) if event.cover_image else '')) }}\"
       >
         <div class="joy-section-inner">
 
           <h2 class="joy-section-title">{{ s.title }}</h2>
-
-          {% if img_src %}
-            <div class="joy-inline-media">
-              <img class="joy-inline-img" src="{{ img_src }}" alt="{{ s.title }} image" loading="lazy">
-            </div>
-          {% endif %}
 
           {% if s.kind == "home" %}
             <div class="joy-home-inline">
