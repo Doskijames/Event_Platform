@@ -23,17 +23,10 @@ from events_routes import get_event_by_slug, get_event_sections, can_manage_even
 
 # Google Drive uploader (OAuth)
 try:
-    from gdrive_storage import (
-        drive_enabled,
-        upload_file_to_drive,
-        get_drive_service,
-        drive_file_embed_url,
-    )
+    from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
     upload_file_to_drive = None
-    get_drive_service = None
-    drive_file_embed_url = None
 
 
 def _drive_uc_url(file_id: str, *, mode: str = "view") -> str:
@@ -98,57 +91,6 @@ def _local_upload_exists(filename: str) -> bool:
         return False
 
 
-# Simple in-memory cache to avoid calling Drive list() repeatedly.
-_DRIVE_NAME_URL_CACHE = {}
-
-
-def _drive_url_for_filename(filename: str) -> str:
-    """Try to resolve a legacy stored filename to a Drive URL by searching within
-    the configured folder (GOOGLE_DRIVE_FOLDER_ID). Returns "" if not found."""
-    fn = (filename or "").strip()
-    if not fn or _is_url(fn) or _looks_like_drive_file_id(fn):
-        return ""
-
-    if fn in _DRIVE_NAME_URL_CACHE:
-        return _DRIVE_NAME_URL_CACHE.get(fn, "")
-
-    if not callable(drive_enabled) or not drive_enabled():
-        _DRIVE_NAME_URL_CACHE[fn] = ""
-        return ""
-
-    if not callable(get_drive_service) or not callable(drive_file_embed_url):
-        _DRIVE_NAME_URL_CACHE[fn] = ""
-        return ""
-
-    folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
-    if not folder_id:
-        _DRIVE_NAME_URL_CACHE[fn] = ""
-        return ""
-
-    # Escape single quotes for Drive query.
-    safe_name = fn.replace("'", "\\'")
-    q = f"name='{safe_name}' and '{folder_id}' in parents and trashed=false"
-
-    try:
-        svc = get_drive_service()
-        res = svc.files().list(
-            q=q,
-            fields="files(id, name, createdTime)",
-            pageSize=1,
-            orderBy="createdTime desc",
-        ).execute()
-        files = res.get("files") or []
-        if files:
-            url = drive_file_embed_url(files[0]["id"])
-            _DRIVE_NAME_URL_CACHE[fn] = url
-            return url
-    except Exception:
-        pass
-
-    _DRIVE_NAME_URL_CACHE[fn] = ""
-    return ""
-
-
 def _public_media_url(stored_value: str):
     """
     Converts what's stored in DB into a usable URL.
@@ -167,10 +109,7 @@ def _public_media_url(stored_value: str):
         return _drive_uc_url(v)
     if _local_upload_exists(v):
         return url_for("static", filename=f"uploads/{v}")
-
-    # Last resort: the DB might contain only the original filename even though the
-    # file actually lives in Drive. Try to find it in the configured Drive folder.
-    return _drive_url_for_filename(v)
+    return ""
 def _save_to_storage(file_storage, filename: str) -> str:
     """
     Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
