@@ -8,6 +8,7 @@
 import os
 import time
 import secrets
+import re
 from datetime import datetime, timezone
 
 from flask import (
@@ -53,6 +54,28 @@ def _drive_ok() -> bool:
     return has_folder and has_client_json and has_refresh
 
 
+def _extract_drive_file_id(v: str) -> str:
+    s = (v or "").strip()
+    if not s:
+        return ""
+    if s.startswith("gdrive:"):
+        return s.split("gdrive:", 1)[1].strip()
+
+    low = s.lower()
+    if "id=" in low:
+        try:
+            part = s.split("id=", 1)[1]
+            return part.split("&", 1)[0].strip()
+        except Exception:
+            return ""
+    if "/d/" in low:
+        try:
+            part = s.split("/d/", 1)[1]
+            return part.split("/", 1)[0].strip()
+        except Exception:
+            return ""
+    return ""
+
 def _is_url(s: str) -> bool:
     s = (s or "").strip().lower()
     return s.startswith("http://") or s.startswith("https://")
@@ -90,6 +113,17 @@ def _local_upload_exists(filename: str) -> bool:
     except Exception:
         return False
 
+
+def media_url(stored_value: str) -> str:
+    v = (stored_value or "").strip()
+    if not v:
+        return ""
+    fid = _extract_drive_file_id(v)
+    if fid:
+        return url_for("drive_media", file_id=fid)
+    if _looks_like_drive_file_id(v):
+        return url_for("drive_media", file_id=v)
+    return url_for("static", filename=f"uploads/{v}")
 
 def _public_media_url(stored_value: str):
     """
@@ -134,23 +168,28 @@ def _save_to_storage(file_storage, filename: str) -> str:
             mime_type = getattr(file_storage, "mimetype", "") or ""
             mode = "view" if mime_type.startswith("image/") else "download"
 
-            # Dict response
-            if isinstance(meta, dict):
-                url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
-                if url and url.startswith("http"):
-                    return url
+            
+# Dict response
+if isinstance(meta, dict):
+    fid = (meta.get("file_id") or "").strip()
+    if not fid:
+        url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
+        fid = _extract_drive_file_id(url)
+        if not fid and url and url.startswith("http"):
+            return url
+    if fid:
+        return f"gdrive:{fid}"
 
-                file_id = (meta.get("file_id") or "").strip()
-                if file_id:
-                    return _drive_uc_url(file_id, mode=mode)
-
-            # String response (URL or file_id)
-            if isinstance(meta, str):
-                s = meta.strip()
-                if s.startswith("http"):
-                    return s
-                if s:
-                    return _drive_uc_url(s, mode=mode)
+            
+# String response (URL or file_id)
+if isinstance(meta, str):
+    s = meta.strip()
+    if not s:
+        return ""
+    fid = _extract_drive_file_id(s) or (s if _looks_like_drive_file_id(s) else "")
+    if fid:
+        return f"gdrive:{fid}"
+    return s
 
         except Exception as e:
             current_app.logger.exception("Drive upload failed; falling back to local save. err=%s", e)
@@ -173,7 +212,7 @@ def get_photos(event_id: int, kind: str):
             rr = dict(r)
         else:
             rr = {k: r[k] for k in r.keys()}  # sqlite3.Row -> dict
-        rr["file_url"] = _public_media_url(rr.get("file_name", ""))
+        rr["file_url"] = media_url(rr.get("file_name", ""))
         out.append(rr)
 
     return out
@@ -254,7 +293,7 @@ def register_photo_routes(app):
                 music_file = music_row.get("file_name")
             else:
                 music_file = music_row["file_name"]
-            music_url = _public_media_url(music_file)
+            music_url = media_url(music_file)
 
         return render_template(
             "event_photos.html",
