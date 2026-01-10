@@ -19,19 +19,24 @@
     <div class="nav-left">
       {% if has_endpoint('home') %}
         <a class="brand" href="{{ url_for('home') }}">E-Accesslink.ng</a>
-        <a class="navlink" href="{{ url_for('home') }}">Home</a>
+        <a class="navlink desktop-only" href="{{ url_for('home') }}">Home</a>
       {% else %}
         <a class="brand" href="/">E-Accesslink.ng</a>
       {% endif %}
 
       {% if has_endpoint('events') %}
-        <a class="navlink" href="{{ url_for('events') }}">Events</a>
+        <a class="navlink desktop-only" href="{{ url_for('events') }}">Events</a>
       {% elif has_endpoint('event_gate') %}
-        <a class="navlink" href="{{ url_for('event_gate') }}">Events</a>
+        <a class="navlink desktop-only" href="{{ url_for('event_gate') }}">Events</a>
       {% endif %}
     </div>
 
-    <div class="nav-right">
+    <!-- Mobile burger -->
+    <button class="mobile-nav-toggle mobile-only" id="mobileNavToggle" type="button" aria-label="Open menu" aria-expanded="false">
+      ☰
+    </button>
+
+    <div class="nav-right desktop-only">
       <!-- THEME TOGGLE -->
       <div class="theme-toggle">
         <button class="theme-btn" type="button" data-theme="black">Black</button>
@@ -54,68 +59,4 @@
           <a class="navlink" href="{{ url_for('login') }}">Login</a>
         {% endif %}
 
-        {% if has_endpoint('register') %}
-          <a class="navlink" href="{{ url_for('register') }}">Sign up</a>
-        {% endif %}
-      {% endif %}
-    </div>
-  </div>
-
-  <!-- FLASH MESSAGES -->
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      <div class="flash-wrap">
-        {% for msg in messages %}
-          <div class="flash">{{ msg }}</div>
-        {% endfor %}
-      </div>
-    {% endif %}
-  {% endwith %}
-
-  {% block content %}{% endblock %}
-
-  <!-- FOOTER -->
-  <footer class="footer">
-    <div class="footer-inner">
-      <div class="muted" style="font-weight:900;">
-        © {{ (now().year if now is defined else 2025) }} E-Accesslink.ng
-      </div>
-
-      <a class="footer-ig" target="_blank" rel="noopener"
-         href="https://www.instagram.com/eaccesslink.ng"
-         aria-label="Instagram">
-        <svg class="ig-icon" viewBox="0 0 24 24">
-          <path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5zm10 2H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3z"/>
-        </svg>
-      </a>
-    </div>
-  </footer>
-
-  <script>
-    (function(){
-      const themeLink = document.getElementById("themeStylesheet");
-      const buttons = Array.from(document.querySelectorAll(".theme-btn"));
-      const THEMES = {
-        black: "{{ url_for('static', filename='themes/black.css') }}",
-        grey:  "{{ url_for('static', filename='themes/grey.css') }}",
-        light: "{{ url_for('static', filename='themes/light.css') }}"
-      };
-
-      function applyTheme(theme){
-        if(!THEMES[theme]) theme = "black";
-        themeLink.href = THEMES[theme];
-        localStorage.setItem("theme", theme);
-        buttons.forEach(b => b.classList.toggle("active", b.dataset.theme === theme));
-      }
-
-      buttons.forEach(btn => {
-        btn.addEventListener("click", () => applyTheme(btn.dataset.theme));
-      });
-
-      applyTheme(localStorage.getItem("theme") || "black");
-    })();
-  </script>
-
-  {% block scripts %}{% endblock %}
-</body>
-</html>
+        {% if
