@@ -22,7 +22,12 @@ def using_postgres() -> bool:
 
 
 def _sqlite_db_path() -> str:
-    # Prefer Flask config, fallback to env var, fallback to app.db
+    """
+    Prefer Flask config DATABASE if available, else env var DATABASE_PATH, else app.db.
+
+    This is intentionally defensive: during some imports (or early in app startup),
+    current_app may not be available yet.
+    """
     try:
         p = current_app.config.get("DATABASE")
         if p:
@@ -104,11 +109,25 @@ class DB:
 
 
 def _connect_sqlite() -> DB:
+    """
+    SQLite connection configured for typical web hosting:
+    - check_same_thread=False to avoid thread issues (safe for gunicorn sync workers too)
+    - a small timeout to reduce 'database is locked' surprises
+    """
     path = _sqlite_db_path()
-    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = sqlite3.connect(
+        path,
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        check_same_thread=False,
+        timeout=30,
+    )
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
+    try:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA journal_mode = WAL;")
+    except Exception:
+        # Some platforms/filesystems may not support WAL; ignore if it fails.
+        pass
     return DB("sqlite", conn)
 
 
@@ -119,9 +138,81 @@ def _connect_postgres() -> DB:
     return DB("postgres", conn)
 
 
+# ----------------------------
+# Schema helpers (IMPORTANT)
+# ----------------------------
+def _sqlite_table_exists(db: DB, table_name: str) -> bool:
+    try:
+        cur = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (table_name,),
+        )
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def _postgres_table_exists(db: DB, table_name: str) -> bool:
+    try:
+        cur = db.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema='public' AND table_name=%s
+            LIMIT 1
+            """,
+            (table_name,),
+        )
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def schema_ready(db: DB) -> bool:
+    """
+    Returns True if the core tables exist.
+
+    This is the key fix for your "sqlite3.OperationalError: no such table: events"
+    that can happen if the DB file exists but schema hasn't been created yet.
+    """
+    if db.kind == "postgres":
+        return _postgres_table_exists(db, "events") and _postgres_table_exists(db, "users")
+    return _sqlite_table_exists(db, "events") and _sqlite_table_exists(db, "users")
+
+
+def ensure_schema(db: DB):
+    """
+    Ensure schema exists for the current DB connection.
+    Safe to call multiple times.
+    """
+    if schema_ready(db):
+        return
+
+    if db.kind == "postgres":
+        _create_schema_postgres(db)
+    else:
+        _create_schema_sqlite(db)
+
+
 def get_db() -> DB:
+    """
+    Returns a request-scoped DB connection (stored on flask.g).
+
+    Added robustness:
+    - After connecting, we ensure schema exists once per request context.
+      This prevents "no such table" errors if the DB file exists but schema isn't initialized
+      (e.g., first deploy, swapped DATABASE_PATH, or a new instance).
+    """
     if not hasattr(g, "db") or g.db is None:
         g.db = _connect_postgres() if using_postgres() else _connect_sqlite()
+
+    # Ensure schema once per request/app context
+    if not getattr(g, "_schema_checked", False):
+        try:
+            ensure_schema(g.db)
+        finally:
+            g._schema_checked = True
+
     return g.db
 
 
@@ -492,11 +583,13 @@ def _create_schema_postgres(db: DB):
 
 
 def init_db():
+    """
+    Call this once on app startup (inside app.app_context()).
+
+    This now delegates to ensure_schema() which is idempotent and will create missing tables.
+    """
     db = get_db()
-    if db.kind == "postgres":
-        _create_schema_postgres(db)
-    else:
-        _create_schema_sqlite(db)
+    ensure_schema(db)
 
     ensure_default_admin()
     ensure_default_sections_for_all_events()
@@ -551,7 +644,7 @@ def ensure_default_admin():
 
 
 # ----------------------------
-# Default sections (IMPORTANT FIX)
+# Default sections
 # ----------------------------
 DEFAULT_SECTIONS = [
     # key, title, sort_order, initial_content
@@ -570,9 +663,6 @@ DEFAULT_SECTIONS = [
 def ensure_default_sections(event_id: int):
     """
     Inserts default sections IF they are missing.
-
-    Fixes your issue where "sections" ended up empty (or missing expected keys like story),
-    causing public/mobile views and editors to behave inconsistently.
     """
     db = get_db()
     cols = get_table_columns(db, "sections")
@@ -613,6 +703,9 @@ def ensure_default_sections(event_id: int):
 
 
 def ensure_default_sections_for_all_events():
+    """
+    Safe to call even on a fresh DB, because schema is ensured before this runs (init_db/get_db).
+    """
     db = get_db()
     cur = db.execute("SELECT id FROM events", ())
     rows = cur.fetchall() or []
