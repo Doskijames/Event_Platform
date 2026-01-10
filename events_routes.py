@@ -14,7 +14,7 @@ try:
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
-    upload_filestorage_to_drive = None
+    upload_file_to_drive = None
 
 from db_core import get_db, ensure_default_sections
 from utils_core import (
@@ -180,7 +180,7 @@ def _drive_ok() -> bool:
     True if Drive uploader is available and env vars are present
     (supports both GOOGLE_* and GDRIVE_* naming).
     """
-    if upload_filestorage_to_drive is None:
+    if upload_file_to_drive is None:
         return False
 
     _ensure_drive_env_aliases()
@@ -371,7 +371,7 @@ def register_event_routes(app):
         stored_value = ""
         if _drive_ok():
             try:
-                res = upload_filestorage_to_drive(file, filename=unique_name, make_public=True)
+                res = upload_file_to_drive(file, filename=unique_name, make_public=True)
                 file_id = (res or {}).get("file_id", "")
                 if file_id:
                     stored_value = _drive_image_url(file_id)
