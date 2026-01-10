@@ -1,4 +1,10 @@
-# photos_routes.py (FULL - OAuth Google Drive uploads + safe fallback + logging)
+# photos_routes.py
+# Full replacement with:
+# - Google Drive OAuth support (stores Drive URL in DB instead of local filename)
+# - Works with upload_file_to_drive returning either:
+#     dict {"file_id","view_url","download_url"}  OR  string (URL or file_id)
+# - Local fallback still supported (legacy)
+
 import os
 import time
 import secrets
@@ -15,12 +21,36 @@ from utils_core import has_event_access, ensure_photos_day_token, now_iso
 from auth_routes import current_user, login_required
 from events_routes import get_event_by_slug, get_event_sections, can_manage_event, allowed_file
 
-# ✅ Drive helpers (OAuth-based gdrive_storage.py)
+# Google Drive uploader (OAuth)
 try:
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
     upload_file_to_drive = None
+
+
+def _drive_uc_url(file_id: str, *, mode: str = "view") -> str:
+    mode = (mode or "view").strip().lower()
+    if mode not in ("view", "download"):
+        mode = "view"
+    return f"https://drive.google.com/uc?export={mode}&id={file_id}"
+
+
+def _drive_ok() -> bool:
+    if upload_file_to_drive is None:
+        return False
+
+    if callable(drive_enabled):
+        try:
+            return bool(drive_enabled())
+        except Exception:
+            pass
+
+    has_folder = bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip())
+    has_client_json = bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+                           or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip())
+    has_refresh = bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip())
+    return has_folder and has_client_json and has_refresh
 
 
 def _is_url(s: str) -> bool:
@@ -36,34 +66,11 @@ def _public_media_url(stored_value: str):
     - If it's a local filename, return a local URL (legacy support).
     """
     v = (stored_value or "").strip()
+    if not v:
+        return ""
     if _is_url(v):
         return v
-
-    # local fallback (legacy)
     return url_for("static", filename=f"uploads/{v}")
-
-
-def _drive_ok() -> bool:
-    """
-    True if Drive uploader is available and OAuth env vars are present.
-    """
-    if upload_file_to_drive is None:
-        return False
-
-    if callable(drive_enabled):
-        try:
-            return bool(drive_enabled())
-        except Exception:
-            return False
-
-    # Fallback check if drive_enabled isn't callable
-    has_folder = bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip())
-    has_client_json = bool(
-        (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-        or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
-    )
-    has_refresh = bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip())
-    return has_folder and has_client_json and has_refresh
 
 
 def _save_to_storage(file_storage, filename: str) -> str:
@@ -71,36 +78,47 @@ def _save_to_storage(file_storage, filename: str) -> str:
     Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
 
     Returns:
-      - Google Drive public URL (string)  ✅ recommended for Render
+      - Google Drive public URL (string)
       - or local filename (fallback)
     """
-    # ---- DIAGNOSTIC LOG ----
     current_app.logger.warning(
         "UPLOAD: drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
         _drive_ok(),
         bool(upload_file_to_drive),
         bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool(
-            (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-            or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
-        ),
+        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+             or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
         bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
     )
 
     if _drive_ok():
         try:
-            meta = upload_file_to_drive(
-                file_storage,
-                filename=filename,
-                make_public=True,
-            )
+            meta = upload_file_to_drive(file_storage, filename=filename, make_public=True)
+            mime_type = getattr(file_storage, "mimetype", "") or ""
+            mode = "view" if mime_type.startswith("image/") else "download"
+
+            # Dict response
             if isinstance(meta, dict):
-                return (meta.get("download_url") or meta.get("view_url") or "").strip() or filename
-            return filename
+                url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
+                if url and url.startswith("http"):
+                    return url
+
+                file_id = (meta.get("file_id") or "").strip()
+                if file_id:
+                    return _drive_uc_url(file_id, mode=mode)
+
+            # String response (URL or file_id)
+            if isinstance(meta, str):
+                s = meta.strip()
+                if s.startswith("http"):
+                    return s
+                if s:
+                    return _drive_uc_url(s, mode=mode)
+
         except Exception as e:
             current_app.logger.exception("Drive upload failed; falling back to local save. err=%s", e)
 
-    # Fallback: local save (not ideal on Render, but keeps app working)
+    # Local fallback (legacy)
     save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
     file_storage.save(save_path)
     return filename
@@ -109,10 +127,9 @@ def _save_to_storage(file_storage, filename: str) -> str:
 def get_photos(event_id: int, kind: str):
     rows = get_db().execute(
         "SELECT * FROM event_photos WHERE event_id=? AND kind=? ORDER BY created_at DESC",
-        (event_id, kind)
+        (event_id, kind),
     ).fetchall() or []
 
-    # Normalize to list[dict] so templates can do p.file_url consistently
     out = []
     for r in rows:
         if isinstance(r, dict):
@@ -177,7 +194,7 @@ def register_photo_routes(app):
                         current_user()["id"],
                         "",
                         datetime.now(timezone.utc).isoformat(),
-                    )
+                    ),
                 )
                 saved += 1
 
@@ -190,7 +207,7 @@ def register_photo_routes(app):
         # music row
         music_row = get_db().execute(
             "SELECT * FROM event_photos WHERE event_id=? AND kind=? ORDER BY created_at DESC LIMIT 1",
-            (event["id"], "photos_music")
+            (event["id"], "photos_music"),
         ).fetchone()
 
         music_file = None
@@ -247,7 +264,7 @@ def register_photo_routes(app):
             INSERT INTO event_photos(event_id, kind, file_name, uploader_user_id, uploader_name, created_at)
             VALUES (?,?,?,?,?,?)
             """,
-            (event["id"], "photos_music", stored_value, current_user()["id"], "", now_iso())
+            (event["id"], "photos_music", stored_value, current_user()["id"], "", now_iso()),
         )
         db.commit()
 
@@ -284,7 +301,7 @@ def register_photo_routes(app):
             if action == "open":
                 db.execute(
                     "UPDATE photos_day_settings SET is_open=1, token=?, updated_at=? WHERE event_id=?",
-                    (token, now_iso(), event["id"])
+                    (token, now_iso(), event["id"]),
                 )
                 db.commit()
                 flash("Photos of the Day is now OPEN. Share the link below.")
@@ -293,7 +310,7 @@ def register_photo_routes(app):
             if action == "close":
                 db.execute(
                     "UPDATE photos_day_settings SET is_open=0, updated_at=? WHERE event_id=?",
-                    (now_iso(), event["id"])
+                    (now_iso(), event["id"]),
                 )
                 db.commit()
                 flash("Photos of the Day is now CLOSED.")
@@ -303,7 +320,7 @@ def register_photo_routes(app):
                 new_token = secrets.token_urlsafe(16)
                 db.execute(
                     "UPDATE photos_day_settings SET token=?, updated_at=? WHERE event_id=?",
-                    (new_token, now_iso(), event["id"])
+                    (new_token, now_iso(), event["id"]),
                 )
                 db.commit()
                 flash("New link generated.")
@@ -315,7 +332,7 @@ def register_photo_routes(app):
         share_url = url_for(
             "photos_day_upload",
             token=(settings["token"] if isinstance(settings, dict) else settings["token"]),
-            _external=True
+            _external=True,
         )
 
         return render_template(
@@ -352,7 +369,7 @@ def register_photo_routes(app):
         u = current_user()
         rsvp = db.execute(
             "SELECT first_name, last_name FROM rsvp_responses WHERE event_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
-            (event_id, u["id"])
+            (event_id, u["id"]),
         ).fetchone()
 
         default_name = ""
@@ -391,7 +408,7 @@ def register_photo_routes(app):
                     INSERT INTO event_photos(event_id, kind, file_name, uploader_user_id, uploader_name, created_at)
                     VALUES (?,?,?,?,?,?)
                     """,
-                    (event_id, "photos_day", stored_value, u["id"], uploader_name, now_iso())
+                    (event_id, "photos_day", stored_value, u["id"], uploader_name, now_iso()),
                 )
                 saved += 1
 
