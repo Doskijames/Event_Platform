@@ -1,72 +1,56 @@
 {% extends "base.html" %}
 {% from "_media.html" import media_url %}
+
 {% block content %}
+<div class="page">
+  <h1 style="margin:0 0 14px; color:var(--accent);">Events</h1>
 
-<div class="container">
-  <div class="page-head">
-    <h1>Events</h1>
-    <p class="muted">Browse available events. Log in and enter the passcode to access an event.</p>
+  {% if events and events|length %}
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;">
+      {% for event in events %}
+        <a href="{{ url_for('event_landing', slug=event.slug) }}" style="text-decoration:none; color:inherit;">
+          <div class="section-card" style="padding:0; overflow:hidden;">
+            <div style="background:#0b0b0b;">
+              {% if event.cover_image %}
+                <!-- NO-CROP card image: contain instead of cover to avoid zoom -->
+                <img
+                  src="{{ media_url(event.cover_image) }}"
+                  alt="Event cover image"
+                  style="
+                    width:100%;
+                    height:220px;
+                    object-fit:contain;
+                    object-position:center;
+                    display:block;
+                    background:#0b0b0b;
+                  "
+                >
+              {% else %}
+                <div style="height:220px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+                  Event Photo
+                </div>
+              {% endif %}
+            </div>
 
-    {% if user %}
-      <div class="actions-row">
-        <a class="btn" href="{{ url_for('create_event') }}">+ Create Event</a>
-      </div>
-    {% endif %}
-  </div>
-
-  <div class="events-grid">
-
-    {% if user %}
-      <a class="event-card create-card" href="{{ url_for('create_event') }}">
-        <div class="event-cover create-cover">
-          <div class="create-plus">+</div>
-        </div>
-        <div class="event-card-body">
-          <div class="event-card-header">
-            <h3 class="event-title">Create a New Event</h3>
-            <span class="event-pill">NEW</span>
+            <div style="padding:14px 16px;">
+              <div style="font-weight:900; color:var(--accent); font-size:1.05rem; line-height:1.2;">
+                {{ event.name }}
+              </div>
+              <div class="muted" style="margin-top:6px; font-weight:800;">
+                {{ event.date_iso }}{% if event.location %} • {{ event.location }}{% endif %}
+              </div>
+              {% if event.description %}
+                <div class="muted" style="margin-top:10px; line-height:1.4;">
+                  {{ event.description[:140] }}{% if event.description|length > 140 %}…{% endif %}
+                </div>
+              {% endif %}
+            </div>
           </div>
-          <div class="event-meta">
-            <span class="muted">Start your own event container</span>
-          </div>
-          <div class="event-cta">Click to create →</div>
-        </div>
-      </a>
-    {% endif %}
-
-    {% for e in events %}
-      <a class="event-card" href="{{ url_for('event_gate', slug=e.slug) }}">
-        <div class="event-cover">
-          {% if e.cover_image %}
-            <img src="{{ media_url(e['cover_image']) }}" alt="Event hero image">
-            
-          {% else %}
-            <div class="event-cover-placeholder">No Cover Photo</div>
-          {% endif %}
-        </div>
-
-        <div class="event-card-body">
-          <div class="event-card-header">
-            <h3 class="event-title">{{ e.name }}</h3>
-            <span class="event-pill">LOCKED</span>
-          </div>
-
-          <div class="event-meta">
-            <span>{{ e.date_iso }}</span>
-            <span class="dot">•</span>
-            <span>{{ e.location }}</span>
-          </div>
-
-          <div class="event-description muted">
-            {{ e.description }}
-          </div>
-
-          <div class="event-cta">Open event →</div>
-        </div>
-      </a>
-    {% endfor %}
-
-  </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="muted">No events yet.</div>
+  {% endif %}
 </div>
-
 {% endblock %}

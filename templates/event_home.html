@@ -1,105 +1,44 @@
 {% extends "event_base.html" %}
 {% from "_media.html" import media_url %}
+
 {% block event_content %}
-
-<!-- HERO COVER (photo + overlay text + RSVP) -->
-<section class="joy-hero">
-
-  {% if section.image %}
-    <img class="joy-hero-img"
-         src="{{ media_url(section['image'] or e['cover_image']) }}" alt="Event hero image">
-  {% else %}
-    <div class="joy-hero-placeholder">
-      <div>
-        <h2 class="accent" style="margin:0;">Add a hero photo</h2>
-        <p class="muted" style="margin:10px 0 0;">Admin / Owner can upload the celebrant/couple photo here.</p>
+<div class="section-card" style="padding:0; overflow:hidden;">
+  <div style="background:#0b0b0b;">
+    {% if sections.get('home') and sections.get('home').image %}
+      <!-- NO-CROP hero: shows entire image -->
+      <img
+        src="{{ media_url(sections.get('home').image) }}"
+        alt="Event hero image"
+        style="
+          width:100%;
+          height:auto;
+          max-height:520px;
+          object-fit:contain;
+          object-position:center;
+          display:block;
+          background:#0b0b0b;
+        "
+      >
+    {% else %}
+      <div style="height:260px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+        Event Photo
       </div>
+    {% endif %}
+  </div>
+
+  <div style="padding:18px;">
+    <h1 style="margin:0 0 8px; color:var(--accent);">{{ event.name }}</h1>
+    <div class="muted" style="font-weight:800;">
+      {{ event.date_iso }}{% if event.location %} • {{ event.location }}{% endif %}
     </div>
-  {% endif %}
 
-  <div class="joy-hero-overlay">
-  {# Event name moved to base/topbar for public view #}
-    <p class="joy-message">We can’t wait to share our special day with you.</p>
-
-    <a class="joy-cta" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">
-      RSVP
-    </a>
-  </div>
-
-</section>
-
-<!-- DATE / LOCATION / COUNTDOWN -->
-<section class="joy-date-card">
-
-  <div class="joy-date-weekday">{{ weekday }}</div>
-  <div class="joy-date-long">{{ long_date }}</div>
-  <div class="joy-date-location">{{ event.location }}</div>
-
-  <div class="joy-countdown">
-    <span class="joy-countdown-value" id="cd-days">--</span> DAYS
-    <span class="joy-countdown-value" id="cd-hrs">--</span> HRS
-    <span class="joy-countdown-value" id="cd-mins">--</span> MINS
-  </div>
-
-  <a class="joy-unlock" href="{{ url_for('event_section', slug=event.slug, section_key='rsvp') }}">
-    RSVP
-  </a>
-
-</section>
-
-{% if is_admin %}
-  <div class="section-card" style="margin-top:16px;">
-    <h3 class="accent" style="margin-top:0;">Admin / Owner Controls</h3>
-
-    <form method="POST"
-          enctype="multipart/form-data"
-          action="{{ url_for('upload_section_image', slug=event.slug, section_key=section_key) }}"
-          class="admin-box">
-      <div class="admin-row">
-        <label class="mini-label">Event Home Hero Image (Couple/Celebrant)</label>
-        <input class="mini-file" type="file" name="image" required>
-        <button class="btn mini-btn" type="submit">Upload</button>
+    {% if sections.get('home') and (sections.get('home').content or sections.get('home').draft_content) %}
+      <div style="margin-top:14px;">
+        <div class="ql-editor" style="padding:0;">
+          {{ (sections.get('home').content or '')|safe }}
+        </div>
       </div>
-    </form>
-
-    <form method="POST"
-          action="{{ url_for('toggle_section', slug=event.slug, section_key=section_key) }}"
-          class="admin-box">
-      <button class="btn btn-outline" type="submit">
-        {% if section.visible %}Hide Home Section{% else %}Show Home Section{% endif %}
-      </button>
-    </form>
+    {% endif %}
   </div>
-{% endif %}
-
-<script>
-  (function(){
-    const targetStr = "{{ countdown_iso }}";
-    if (!targetStr) return;
-
-    const target = new Date(targetStr).getTime();
-    const elDays = document.getElementById("cd-days");
-    const elHrs  = document.getElementById("cd-hrs");
-    const elMins = document.getElementById("cd-mins");
-
-    function tick(){
-      const now = Date.now();
-      let diff = target - now;
-      if (diff < 0) diff = 0;
-
-      const minsTotal = Math.floor(diff / 60000);
-      const days = Math.floor(minsTotal / (60 * 24));
-      const hrs  = Math.floor((minsTotal % (60 * 24)) / 60);
-      const mins = minsTotal % 60;
-
-      elDays.textContent = String(days);
-      elHrs.textContent  = String(hrs).padStart(2, "0");
-      elMins.textContent = String(mins).padStart(2, "0");
-    }
-
-    tick();
-    setInterval(tick, 30000);
-  })();
-</script>
-
+</div>
 {% endblock %}
