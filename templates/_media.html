@@ -1,10 +1,38 @@
 {# templates/_media.html #}
-{# This macro is imported by templates to build <img src="..."> safely. #}
+{# Usage:
+   {% from "_media.html" import media_url %}
+   <img src="{{ media_url(row.cover_image) }}">
+#}
+
+{% macro _extract_drive_id(v) -%}
+  {%- if not v -%}{%- else -%}
+    {%- set s = v|string -%}
+    {%- if "id=" in s -%}
+      {%- set parts = s.split("id=") -%}
+      {%- set tail = parts[-1] -%}
+      {%- set fid = tail.split("&")[0] -%}
+      {{- fid -}}
+    {%- elif "/file/d/" in s -%}
+      {%- set fid = s.split("/file/d/")[-1].split("/")[0] -%}
+      {{- fid -}}
+    {%- else -%}
+      {{- s -}}
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
 
 {% macro media_url(value) -%}
-  {%- if resolve_media_url is defined -%}
-    {{ resolve_media_url(value) }}
+  {%- set v = (value or "")|string|trim -%}
+  {%- if not v -%}
+    {{- "" -}}
+  {%- elif v.startswith("http://") or v.startswith("https://") -%}
+    {%- if "drive.google.com" in v or "drive.usercontent.google.com" in v -%}
+      {%- set fid = _extract_drive_id(v) -%}
+      {{- "/media/drive/" ~ fid -}}
+    {%- else -%}
+      {{- v -}}
+    {%- endif -%}
   {%- else -%}
-    {{ value }}
+    {{- url_for("static", filename="uploads/" ~ v) -}}
   {%- endif -%}
 {%- endmacro %}
