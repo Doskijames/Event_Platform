@@ -1,4 +1,4 @@
-# photos_routes.py (FULL - Google Drive uploads + safe fallback + logging)
+# photos_routes.py (FULL - OAuth Drive uploads + safe fallback + logging)
 import os
 import time
 import secrets
@@ -15,41 +15,12 @@ from utils_core import has_event_access, ensure_photos_day_token, now_iso
 from auth_routes import current_user, login_required
 from events_routes import get_event_by_slug, get_event_sections, can_manage_event, allowed_file
 
-# ✅ Drive helpers (from your gdrive_storage.py)
+# ✅ Drive helpers (OAuth)
 try:
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
     upload_file_to_drive = None
-
-
-def _ensure_drive_env_aliases():
-    """
-    Prefer Base64 credentials on Render (safe, avoids newline issues).
-
-    Supported inputs:
-      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended)
-      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 (optional alias)
-      - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64 (optional alias)
-
-    Folder ID:
-      - GOOGLE_DRIVE_FOLDER_ID (recommended)
-      - GDRIVE_FOLDER_ID (alias)
-
-    IMPORTANT:
-      - We intentionally do NOT alias raw JSON env vars into GOOGLE_SERVICE_ACCOUNT_JSON,
-        because raw JSON often breaks on Render due to newline characters in private_key.
-    """
-    # ---- Base64 creds aliases (SAFE) ----
-    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
-
-    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
-
-    # ---- Folder ID alias ----
-    if os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() == "" and os.getenv("GDRIVE_FOLDER_ID", "").strip():
-        os.environ["GOOGLE_DRIVE_FOLDER_ID"] = os.getenv("GDRIVE_FOLDER_ID", "").strip()
 
 
 def _is_url(s: str) -> bool:
@@ -65,11 +36,31 @@ def _public_media_url(stored_value: str):
     - If it's a local filename, return a local URL (legacy support).
     """
     v = (stored_value or "").strip()
+    if not v:
+        return ""
     if _is_url(v):
         return v
-
-    # local fallback (legacy)
     return url_for("static", filename=f"uploads/{v}")
+
+
+def _drive_ok() -> bool:
+    if upload_file_to_drive is None:
+        return False
+    if callable(drive_enabled):
+        try:
+            return bool(drive_enabled())
+        except Exception:
+            return False
+
+    # Fallback check
+    return bool(
+        (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+        and (
+            (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+            or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
+        )
+        and (os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()
+    )
 
 
 def _save_to_storage(file_storage, filename: str) -> str:
@@ -77,43 +68,31 @@ def _save_to_storage(file_storage, filename: str) -> str:
     Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
 
     Returns:
-      - Google Drive public URL (string)  ✅ recommended for Render
+      - Google Drive public URL (string) ✅ best for Render
       - or local filename (fallback)
     """
-    _ensure_drive_env_aliases()
-
-    # ---- DIAGNOSTIC LOG ----
     current_app.logger.warning(
-        "UPLOAD: drive_enabled=%s upload_func=%s has_folder=%s has_json=%s",
-        (drive_enabled() if callable(drive_enabled) else None),
+        "UPLOAD: drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
+        _drive_ok(),
         bool(upload_file_to_drive),
-        bool(os.getenv("GOOGLE_DRIVE_FOLDER_ID")),
-        bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")),
+        bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
+        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip() or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
+        bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
     )
 
-    drive_ok = (
-        drive_enabled is not None
-        and upload_file_to_drive is not None
-        and callable(drive_enabled)
-        and drive_enabled()
-    )
-
-    if drive_ok:
+    if _drive_ok():
         try:
-            # Upload to Drive and store a public URL in DB
-            meta = upload_file_to_drive(
-                file_storage,
-                filename=filename,
-                make_public=True,
-            )
-
-            # For <img src="..."> and <audio src="...">, a direct link is best.
-            return meta.get("download_url") or meta.get("view_url") or meta.get("file_id")
+            meta = upload_file_to_drive(file_storage, filename=filename, make_public=True)
+            if isinstance(meta, dict):
+                url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
+                if url:
+                    return url
+            # If it doesn't return a URL, treat as failure and fall back
+            raise RuntimeError("Drive upload returned no URL")
         except Exception as e:
-            # If Drive upload fails, log it and fall back to local (keeps app working)
             current_app.logger.exception("Drive upload failed; falling back to local save. err=%s", e)
 
-    # Fallback: local save (not ideal on Render, but keeps app working)
+    # Fallback: local save
     save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
     file_storage.save(save_path)
     return filename
@@ -125,13 +104,12 @@ def get_photos(event_id: int, kind: str):
         (event_id, kind)
     ).fetchall() or []
 
-    # Normalize to list[dict] so templates can do p.file_url consistently
     out = []
     for r in rows:
         if isinstance(r, dict):
             rr = dict(r)
         else:
-            rr = {k: r[k] for k in r.keys()}  # sqlite3.Row -> dict
+            rr = {k: r[k] for k in r.keys()}
         rr["file_url"] = _public_media_url(rr.get("file_name", ""))
         out.append(rr)
 
@@ -200,7 +178,6 @@ def register_photo_routes(app):
 
         photos = get_photos(event["id"], "photos")
 
-        # music row
         music_row = get_db().execute(
             "SELECT * FROM event_photos WHERE event_id=? AND kind=? ORDER BY created_at DESC LIMIT 1",
             (event["id"], "photos_music")
@@ -209,10 +186,7 @@ def register_photo_routes(app):
         music_file = None
         music_url = None
         if music_row:
-            if isinstance(music_row, dict):
-                music_file = music_row.get("file_name")
-            else:
-                music_file = music_row["file_name"]
+            music_file = music_row.get("file_name") if isinstance(music_row, dict) else music_row["file_name"]
             music_url = _public_media_url(music_file)
 
         return render_template(
