@@ -2,43 +2,39 @@
 {% from "_media.html" import media_url %}
 
 {% block event_content %}
+
 <div class="section-card" style="padding:0; overflow:hidden;">
   <div style="background:#0b0b0b;">
-    {% if sections.get('home') and sections.get('home').image %}
-      <!-- NO-CROP hero: shows entire image -->
-      <img
-        src="{{ media_url(sections.get('home').image) }}"
-        alt="Event hero image"
-        style="
-          width:100%;
-          height:auto;
-          max-height:520px;
-          object-fit:contain;
-          object-position:center;
-          display:block;
-          background:#0b0b0b;
-        "
-      >
+    {% if section and section.image %}
+      <img src="{{ media_url(section.image) }}"
+           alt="Event image"
+           style="width:100%; height:420px; object-fit:contain; display:block; background:#0b0b0b;">
+    {% elif event and event.cover_image %}
+      <img src="{{ media_url(event.cover_image) }}"
+           alt="Event cover image"
+           style="width:100%; height:420px; object-fit:contain; display:block; background:#0b0b0b;">
     {% else %}
-      <div style="height:260px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
+      <div style="height:420px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
         Event Photo
       </div>
     {% endif %}
   </div>
 
   <div style="padding:18px;">
-    <h1 style="margin:0 0 8px; color:var(--accent);">{{ event.name }}</h1>
-    <div class="muted" style="font-weight:800;">
-      {{ event.date_iso }}{% if event.location %} • {{ event.location }}{% endif %}
-    </div>
+    <h2 style="margin:0 0 10px; color:var(--accent);">{{ event.name }}</h2>
+    {% if event.date_iso or event.location %}
+      <div class="muted" style="font-weight:800; margin-bottom:12px;">
+        {% if event.date_iso %}<span>{{ event.date_iso }}</span>{% endif %}
+        {% if event.location %}<span style="margin-left:10px;">{{ event.location }}</span>{% endif %}
+      </div>
+    {% endif %}
 
-    {% if sections.get('home') and (sections.get('home').content or sections.get('home').draft_content) %}
-      <div style="margin-top:14px;">
-        <div class="ql-editor" style="padding:0;">
-          {{ (sections.get('home').content or '')|safe }}
-        </div>
+    {% if section and (section.content or section.draft_content) %}
+      <div class="ql-editor story-public" style="padding:0;">
+        {{ (section.draft_content if (draft_preview and can_manage) else section.content)|safe }}
       </div>
     {% endif %}
   </div>
 </div>
+
 {% endblock %}

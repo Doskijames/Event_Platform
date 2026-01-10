@@ -2,55 +2,45 @@
 {% from "_media.html" import media_url %}
 
 {% block content %}
-<div class="page">
-  <h1 style="margin:0 0 14px; color:var(--accent);">Events</h1>
+<div class="page-wrap">
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+    <h1 style="margin:0;">Events</h1>
+    {% if user %}
+      <div class="muted" style="font-weight:700;">Signed in as {{ user.email }}</div>
+    {% endif %}
+  </div>
 
-  {% if events and events|length %}
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;">
+  {% if not events or events|length == 0 %}
+    <div class="card" style="margin-top:16px;">
+      <div class="muted" style="font-weight:800;">No events yet.</div>
+    </div>
+  {% else %}
+    <div class="events-grid" style="margin-top:16px; display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px;">
       {% for event in events %}
-        <a href="{{ url_for('event_landing', slug=event.slug) }}" style="text-decoration:none; color:inherit;">
-          <div class="section-card" style="padding:0; overflow:hidden;">
-            <div style="background:#0b0b0b;">
+        <a href="{{ url_for('event_gate', slug=event.slug) }}"
+           style="text-decoration:none; color:inherit;">
+          <div class="card" style="overflow:hidden;">
+            <div style="background:#0b0b0b; height:200px; display:flex; align-items:center; justify-content:center;">
               {% if event.cover_image %}
-                <!-- NO-CROP card image: contain instead of cover to avoid zoom -->
-                <img
-                  src="{{ media_url(event.cover_image) }}"
-                  alt="Event cover image"
-                  style="
-                    width:100%;
-                    height:220px;
-                    object-fit:contain;
-                    object-position:center;
-                    display:block;
-                    background:#0b0b0b;
-                  "
-                >
+                <img src="{{ media_url(event.cover_image) }}"
+                     alt="Event hero image"
+                     style="width:100%; height:100%; object-fit:contain; display:block; background:#0b0b0b;">
               {% else %}
-                <div style="height:220px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
-                  Event Photo
-                </div>
+                <div class="muted" style="font-weight:900;">No cover image</div>
               {% endif %}
             </div>
 
-            <div style="padding:14px 16px;">
-              <div style="font-weight:900; color:var(--accent); font-size:1.05rem; line-height:1.2;">
-                {{ event.name }}
+            <div style="padding:14px;">
+              <div style="font-weight:900; font-size:1.05rem;">{{ event.name }}</div>
+              <div class="muted" style="margin-top:6px;">
+                <div><strong>Date:</strong> {{ event.date_iso }}</div>
+                <div><strong>Location:</strong> {{ event.location }}</div>
               </div>
-              <div class="muted" style="margin-top:6px; font-weight:800;">
-                {{ event.date_iso }}{% if event.location %} • {{ event.location }}{% endif %}
-              </div>
-              {% if event.description %}
-                <div class="muted" style="margin-top:10px; line-height:1.4;">
-                  {{ event.description[:140] }}{% if event.description|length > 140 %}…{% endif %}
-                </div>
-              {% endif %}
             </div>
           </div>
         </a>
       {% endfor %}
     </div>
-  {% else %}
-    <div class="muted">No events yet.</div>
   {% endif %}
 </div>
 {% endblock %}
