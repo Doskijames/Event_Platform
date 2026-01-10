@@ -1,3 +1,4 @@
+{# templates/event_public_all_sections.html #}
 {% extends "event_base.html" %}
 {% from "_media.html" import media_url %}
 {% block event_content %}
@@ -52,6 +53,14 @@
         <div class="joy-section-inner">
 
           <h2 class="joy-section-title">{{ s.title }}</h2>
+
+          {# ✅ INLINE IMAGE (mobile uses this; desktop can keep slideshow) #}
+          {% set img_src = (media_url(s.image) if s.image else (media_url(event.cover_image) if event.cover_image else '')) %}
+          {% if img_src %}
+            <div class="joy-inline-media">
+              <img class="joy-inline-img" src="{{ img_src }}" alt="Section image">
+            </div>
+          {% endif %}
 
           {% if s.kind == "home" %}
             <div class="joy-home-inline">
