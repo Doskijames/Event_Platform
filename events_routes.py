@@ -1,4 +1,15 @@
-# events_routes.py (FULL - OAuth Drive URL storage + media_url helper + logging + add_section sort fix + delete event)
+# events_routes.py
+# Full replacement with:
+# - Google Drive OAuth support (stores Drive URL in DB instead of local filename)
+# - media_url helper used by templates
+# - add_section sort_order fix
+# - delete event route (with cascaded cleanup)
+#
+# Expected env vars (OAuth):
+#   GOOGLE_DRIVE_FOLDER_ID
+#   GOOGLE_OAUTH_CLIENT_SECRET_JSON (or GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64)
+#   GOOGLE_OAUTH_REFRESH_TOKEN
+
 import os
 import secrets
 from datetime import datetime, timezone, datetime as dt_cls
@@ -9,9 +20,8 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-# --- Google Drive integration (OAuth) ---
+# Google Drive uploader (OAuth)
 try:
-    # Expected to expose: drive_enabled(), upload_file_to_drive(...)
     from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
@@ -33,8 +43,7 @@ ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 def allowed_file(filename: str) -> bool:
     if "." not in filename:
         return False
-    ext = filename.rsplit(".", 1)[1].lower()
-    return ext in ALLOWED_EXTENSIONS
+    return filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def get_event_by_slug(slug: str):
@@ -44,7 +53,7 @@ def get_event_by_slug(slug: str):
 def get_event_sections(event_id: int):
     rows = get_db().execute(
         "SELECT * FROM sections WHERE event_id=? ORDER BY sort_order ASC, id ASC",
-        (event_id,)
+        (event_id,),
     ).fetchall()
     return {r["section_key"]: r for r in rows}
 
@@ -132,6 +141,10 @@ def _is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
 
 
+def _drive_uc_view(file_id: str) -> str:
+    return f"https://drive.google.com/uc?export=view&id={file_id}"
+
+
 def media_url(stored_value: str):
     """
     If stored_value is already a URL (Drive), return it.
@@ -152,19 +165,15 @@ def _drive_ok() -> bool:
     if upload_file_to_drive is None:
         return False
 
-    # Prefer the storage module's own check
     if callable(drive_enabled):
         try:
             return bool(drive_enabled())
         except Exception:
-            return False
+            pass
 
-    # Fallback check (should rarely be used)
     has_folder = bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip())
-    has_client_json = bool(
-        (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-        or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
-    )
+    has_client_json = bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+                           or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip())
     has_refresh = bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip())
     return has_folder and has_client_json and has_refresh
 
@@ -176,7 +185,7 @@ def _next_sort_order(event_id: int) -> int:
     db = get_db()
     row = db.execute(
         "SELECT COALESCE(MAX(sort_order), 0) AS m FROM sections WHERE event_id=?",
-        (event_id,)
+        (event_id,),
     ).fetchone()
     try:
         m = int(row["m"] if isinstance(row, dict) else row[0])
@@ -192,30 +201,45 @@ def _drive_upload_image_and_get_url(file_storage, unique_name: str) -> str:
     """
     Upload to Drive and return a URL suitable for <img src="...">.
 
-    Expects upload_file_to_drive to return:
-      {"file_id","view_url","download_url"}
+    Works with both possible upload_file_to_drive return shapes:
+      - dict: {"file_id","view_url","download_url"}
+      - str:  URL OR "file_id"
     """
     if not _drive_ok():
         return ""
 
     current_app.logger.warning(
         "UPLOAD(image): drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
-        True,
+        _drive_ok(),
         bool(upload_file_to_drive),
         bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool(
-            (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-            or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
-        ),
+        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+             or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
         bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
     )
 
     try:
-        meta = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
-        if isinstance(meta, dict):
-            url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
-            return url or ""
-        return ""
+        res = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
+
+        # Dict response
+        if isinstance(res, dict):
+            url = (res.get("download_url") or "").strip() or (res.get("view_url") or "").strip()
+            if url and url.startswith("http"):
+                return url
+
+            file_id = (res.get("file_id") or "").strip()
+            if file_id:
+                return _drive_uc_view(file_id)
+            return ""
+
+        # String response (URL or file_id)
+        s = str(res or "").strip()
+        if not s:
+            return ""
+        if s.startswith("http"):
+            return s
+        return _drive_uc_view(s)
+
     except Exception as e:
         current_app.logger.exception("Drive upload failed in events_routes. err=%s", e)
         return ""
@@ -263,7 +287,7 @@ def register_event_routes(app):
                 INSERT INTO events(slug, name, date_iso, location, description, passcode, owner_user_id, cover_image, created_at)
                 VALUES (?,?,?,?,?,?,?,?,?)
                 """,
-                (slug, name, date_iso, location, description, passcode, u["id"], "", now)
+                (slug, name, date_iso, location, description, passcode, u["id"], "", now),
             )
             db.commit()
 
@@ -369,7 +393,7 @@ def register_event_routes(app):
         filename = secure_filename(file.filename)
         unique_name = f"{slug}-{section_key}-{secrets.token_hex(6)}-{filename}"
 
-        # Try Drive first
+        # Try Drive first (stores URL)
         stored_value = _drive_upload_image_and_get_url(file, unique_name)
 
         # Local fallback (may disappear on Render redeploy)
@@ -389,7 +413,7 @@ def register_event_routes(app):
             SET image=?
             WHERE event_id=? AND section_key=?
             """,
-            (stored_value, event["id"], section_key)
+            (stored_value, event["id"], section_key),
         )
 
         if section_key == "home":
@@ -416,13 +440,13 @@ def register_event_routes(app):
         db = get_db()
         sec = db.execute(
             "SELECT * FROM sections WHERE event_id=? AND section_key=?",
-            (event["id"], section_key)
+            (event["id"], section_key),
         ).fetchone()
 
         new_visible = 0 if int(sec["visible"]) == 1 else 1
         db.execute(
             "UPDATE sections SET visible=? WHERE event_id=? AND section_key=?",
-            (new_visible, event["id"], section_key)
+            (new_visible, event["id"], section_key),
         )
         db.commit()
 
@@ -450,7 +474,7 @@ def register_event_routes(app):
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='story'
             """,
-            (draft_html, event["id"])
+            (draft_html, event["id"]),
         )
         db.commit()
         return ("", 204)
@@ -471,7 +495,7 @@ def register_event_routes(app):
         db = get_db()
         sec = db.execute(
             "SELECT * FROM sections WHERE event_id=? AND section_key='story'",
-            (event["id"],)
+            (event["id"],),
         ).fetchone()
 
         published = (sec["draft_content"] or "") if sec else ""
@@ -480,7 +504,7 @@ def register_event_routes(app):
             UPDATE sections SET content=?, draft_content=?
             WHERE event_id=? AND section_key='story'
             """,
-            (published, published, event["id"])
+            (published, published, event["id"]),
         )
         db.commit()
 
@@ -507,7 +531,7 @@ def register_event_routes(app):
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='meet-couple'
             """,
-            (draft_html, event["id"])
+            (draft_html, event["id"]),
         )
         db.commit()
         return ("", 204)
@@ -528,7 +552,7 @@ def register_event_routes(app):
         db = get_db()
         sec = db.execute(
             "SELECT * FROM sections WHERE event_id=? AND section_key='meet-couple'",
-            (event["id"],)
+            (event["id"],),
         ).fetchone()
 
         published = (sec["draft_content"] or "") if sec else ""
@@ -537,7 +561,7 @@ def register_event_routes(app):
             UPDATE sections SET content=?, draft_content=?
             WHERE event_id=? AND section_key='meet-couple'
             """,
-            (published, published, event["id"])
+            (published, published, event["id"]),
         )
         db.commit()
 
@@ -564,7 +588,7 @@ def register_event_routes(app):
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='proposal'
             """,
-            (draft_html, event["id"])
+            (draft_html, event["id"]),
         )
         db.commit()
         return ("", 204)
@@ -585,7 +609,7 @@ def register_event_routes(app):
         db = get_db()
         sec = db.execute(
             "SELECT * FROM sections WHERE event_id=? AND section_key='proposal'",
-            (event["id"],)
+            (event["id"],),
         ).fetchone()
 
         published = (sec["draft_content"] or "") if sec else ""
@@ -594,7 +618,7 @@ def register_event_routes(app):
             UPDATE sections SET content=?, draft_content=?
             WHERE event_id=? AND section_key='proposal'
             """,
-            (published, published, event["id"])
+            (published, published, event["id"]),
         )
         db.commit()
 
@@ -637,7 +661,7 @@ def register_event_routes(app):
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='tidbits'
             """,
-            (raw_json, event["id"])
+            (raw_json, event["id"]),
         )
         db.commit()
         return ("", 204)
@@ -667,7 +691,7 @@ def register_event_routes(app):
         db = get_db()
         sec = db.execute(
             "SELECT * FROM sections WHERE event_id=? AND section_key='tidbits'",
-            (event["id"],)
+            (event["id"],),
         ).fetchone()
 
         payload_json = (sec["draft_content"] or "[]") if sec else "[]"
@@ -689,7 +713,7 @@ def register_event_routes(app):
 
         db.execute(
             "UPDATE sections SET content=?, draft_content=? WHERE event_id=? AND section_key='tidbits'",
-            (payload_json, payload_json, event["id"])
+            (payload_json, payload_json, event["id"]),
         )
         db.commit()
 
@@ -732,7 +756,7 @@ def register_event_routes(app):
             UPDATE sections SET draft_content=?
             WHERE event_id=? AND section_key='qa'
             """,
-            (raw_json, event["id"])
+            (raw_json, event["id"]),
         )
         db.commit()
         return ("", 204)
@@ -762,7 +786,7 @@ def register_event_routes(app):
         db = get_db()
         sec = db.execute(
             "SELECT * FROM sections WHERE event_id=? AND section_key='qa'",
-            (event["id"],)
+            (event["id"],),
         ).fetchone()
 
         payload_json = (sec["draft_content"] or "[]") if sec else "[]"
@@ -784,7 +808,7 @@ def register_event_routes(app):
 
         db.execute(
             "UPDATE sections SET content=?, draft_content=? WHERE event_id=? AND section_key='qa'",
-            (payload_json, payload_json, event["id"])
+            (payload_json, payload_json, event["id"]),
         )
         db.commit()
 
@@ -830,7 +854,7 @@ def register_event_routes(app):
                 INSERT INTO sections(event_id, section_key, title, visible, content, draft_content, image, sort_order)
                 VALUES (?,?,?,?,?,?,?,?)
                 """,
-                (event["id"], section_key, name, 1, initial_content, initial_content, "", new_sort)
+                (event["id"], section_key, name, 1, initial_content, initial_content, "", new_sort),
             )
             db.commit()
 
@@ -1087,7 +1111,9 @@ def register_event_routes(app):
         public_preview_url = None
         back_to_editor_url = None
         if real_admin:
-            public_preview_url = url_for("event_section", slug=slug, section_key=section_key, _as_user=1, _draft=1)
+            public_preview_url = url_for(
+                "event_section", slug=slug, section_key=section_key, _as_user=1, _draft=1
+            )
         if view_as_user and real_admin:
             back_to_editor_url = url_for("event_section", slug=slug, section_key=section_key)
 
@@ -1298,7 +1324,7 @@ def register_event_routes(app):
         ensure_default_sections(event["id"])
         sections = get_event_sections(event["id"])
 
-        def row_get_local(row, key, default=None):
+        def row_get(row, key, default=None):
             try:
                 if row is None:
                     return default
@@ -1315,10 +1341,10 @@ def register_event_routes(app):
             if not s:
                 continue
 
-            if int(row_get_local(s, "visible", 1) or 0) == 0:
+            if int(row_get(s, "visible", 1) or 0) == 0:
                 continue
 
-            title = (row_get_local(s, "title") or "").strip()
+            title = (row_get(s, "title") or "").strip()
             if not title:
                 title = {
                     "home": "Home",
@@ -1331,30 +1357,32 @@ def register_event_routes(app):
                     "photos": "Photos",
                 }.get(key, key.replace("-", " ").title())
 
-            img = (row_get_local(s, "image") or "").strip()
+            img = (row_get(s, "image") or "").strip()
             if not img:
                 img = (event.get("cover_image") or event["cover_image"] or "").strip()
 
             kind = "html"
-            html = row_get_local(s, "content") or ""
+            html = row_get(s, "content") or ""
             items = []
 
             if key in ("tidbits", "qa") or key.startswith("custom-qa-"):
                 kind = "qa_list"
-                items = parse_qa_list_json(row_get_local(s, "content") or "[]")
+                items = parse_qa_list_json(row_get(s, "content") or "[]")
             elif key in ("rsvp", "photos"):
                 kind = "link"
             elif key == "home":
                 kind = "home"
 
-            public_sections.append({
-                "key": key,
-                "title": title,
-                "image": img,   # url OR local filename
-                "kind": kind,
-                "html": html,
-                "items": items,
-            })
+            public_sections.append(
+                {
+                    "key": key,
+                    "title": title,
+                    "image": img,  # url OR local filename
+                    "kind": kind,
+                    "html": html,
+                    "items": items,
+                }
+            )
 
         return render_template(
             "event_public_all_sections.html",
