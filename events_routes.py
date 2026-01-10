@@ -1,4 +1,4 @@
-# events_routes.py (FULL - Drive URL storage + media_url helper + base64-first env aliases + logging + add_section sort fix + delete event)
+# events_routes.py (FULL - OAuth Drive URL storage + media_url helper + logging + add_section sort fix + delete event)
 import os
 import secrets
 from datetime import datetime, timezone, datetime as dt_cls
@@ -9,7 +9,7 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-# --- Google Drive integration ---
+# --- Google Drive integration (OAuth) ---
 try:
     # Expected to expose: drive_enabled(), upload_file_to_drive(...)
     from gdrive_storage import drive_enabled, upload_file_to_drive
@@ -132,11 +132,6 @@ def _is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
 
 
-def _drive_image_url(file_id: str) -> str:
-    # Embed-friendly for <img src="...">
-    return f"https://drive.google.com/uc?export=view&id={file_id}"
-
-
 def media_url(stored_value: str):
     """
     If stored_value is already a URL (Drive), return it.
@@ -150,69 +145,28 @@ def media_url(stored_value: str):
     return url_for("static", filename=f"uploads/{v}")
 
 
-def _ensure_drive_env_aliases():
-    """
-    Base64-first alias mapping (safe on Render).
-
-    gdrive_storage.py expects:
-      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended) OR GOOGLE_SERVICE_ACCOUNT_JSON
-      - GOOGLE_DRIVE_FOLDER_ID
-
-    We support these aliases too:
-      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 / GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON
-      - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64 / GDRIVE_SERVICE_ACCOUNT_JSON
-      - GDRIVE_FOLDER_ID
-    """
-    # ---- Base64 creds aliases (SAFE) ----
-    if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip():
-        v = (os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
-        if v:
-            os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = v
-
-    if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip():
-        v = (os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
-        if v:
-            os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = v
-
-    # ---- Folder ID alias ----
-    if not (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip():
-        v = (os.getenv("GDRIVE_FOLDER_ID") or "").strip()
-        if v:
-            os.environ["GOOGLE_DRIVE_FOLDER_ID"] = v
-
-    # ---- Optional RAW fallback (only if no base64 exists) ----
-    # Recommended: remove RAW vars from Render entirely, but keep this for compatibility.
-    if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip():
-        if not (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip():
-            v = (os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON") or "").strip()
-            if not v:
-                v = (os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON") or "").strip()
-            if v:
-                os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = v
-
-
 def _drive_ok() -> bool:
     """
-    True if Drive uploader is available and env vars are present.
-    (supports both GOOGLE_* and alias naming)
+    True if Drive uploader is available and OAuth env vars are present.
     """
     if upload_file_to_drive is None:
         return False
 
-    _ensure_drive_env_aliases()
-
+    # Prefer the storage module's own check
     if callable(drive_enabled):
         try:
             return bool(drive_enabled())
         except Exception:
             return False
 
-    has_creds = bool(
-        (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
-        or (os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
-    )
+    # Fallback check (should rarely be used)
     has_folder = bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip())
-    return has_creds and has_folder
+    has_client_json = bool(
+        (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+        or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
+    )
+    has_refresh = bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip())
+    return has_folder and has_client_json and has_refresh
 
 
 def _next_sort_order(event_id: int) -> int:
@@ -237,44 +191,31 @@ def _next_sort_order(event_id: int) -> int:
 def _drive_upload_image_and_get_url(file_storage, unique_name: str) -> str:
     """
     Upload to Drive and return a URL suitable for <img src="...">.
-    Works with both possible upload_file_to_drive return shapes:
-      - dict: {"file_id","view_url","download_url"}
-      - str:  "file_id"
+
+    Expects upload_file_to_drive to return:
+      {"file_id","view_url","download_url"}
     """
     if not _drive_ok():
         return ""
 
-    # Diagnostic log (helps confirm env + function availability)
     current_app.logger.warning(
-        "UPLOAD(image): drive_enabled=%s upload_func=%s has_folder=%s has_base64=%s has_raw=%s",
-        (drive_enabled() if callable(drive_enabled) else None),
+        "UPLOAD(image): drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
+        True,
         bool(upload_file_to_drive),
         bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool((os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()),
-        bool((os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()),
+        bool(
+            (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
+            or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()
+        ),
+        bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
     )
 
     try:
-        res = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
-
-        # New/Recommended: dict response
-        if isinstance(res, dict):
-            url = (res.get("download_url") or "").strip() or (res.get("view_url") or "").strip()
-            if url:
-                return url
-
-            file_id = (res.get("file_id") or "").strip()
-            if file_id:
-                return _drive_image_url(file_id)
-            return ""
-
-        # Legacy: file_id string
-        file_id = str(res or "").strip()
-        if file_id:
-            return _drive_image_url(file_id)
-
+        meta = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
+        if isinstance(meta, dict):
+            url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
+            return url or ""
         return ""
-
     except Exception as e:
         current_app.logger.exception("Drive upload failed in events_routes. err=%s", e)
         return ""
