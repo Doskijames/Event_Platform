@@ -47,7 +47,7 @@
         id="sec-{{ s.key }}"
         class="joy-section"
         data-key="{{ s.key }}"
-        data-img=\"{{ (media_url(s.image) if s.image else (media_url(event.cover_image) if event.cover_image else '')) }}\"
+        data-img="{{ (media_url(s.image) if s.image else (media_url(event.cover_image) if event.cover_image else '')) }}"
       >
         <div class="joy-section-inner">
 
@@ -166,7 +166,7 @@
     }
   }
 
-  // ✅ root MUST be the right scroll container (THIS WAS YOUR MAIN ISSUE)
+  // root MUST be the right scroll container
   const obs = new IntersectionObserver((entries)=>{
     const visible = entries
       .filter(e => e.isIntersecting)
@@ -185,7 +185,7 @@
   sections.forEach(s => obs.observe(s));
   initImage();
 
-  // ✅ Smooth scroll inside the right pane (NOT window)
+  // Smooth scroll inside the right pane
   function scrollToAnchor(hash){
     if(!hash || !hash.startsWith("#sec-")) return;
     const el = scroll.querySelector(hash);
