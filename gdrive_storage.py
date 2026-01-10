@@ -1,4 +1,4 @@
-# gdrive_storage.py (FULL - supports GOOGLE_* and GDRIVE_* env vars)
+# gdrive_storage.py (FULL - supports GOOGLE_* and GDRIVE_* env vars) ✅ FIXED
 import os
 import io
 import json
@@ -27,49 +27,62 @@ def _load_service_account_info() -> Dict[str, Any]:
     """
     Loads Google service account JSON from env.
 
+    Preferred:
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
+
     Supported env vars (choose ONE):
-    - GOOGLE_SERVICE_ACCOUNT_JSON: raw JSON string
-    - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: base64 encoded JSON string
+      - GOOGLE_SERVICE_ACCOUNT_JSON: raw JSON string
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: base64 encoded JSON string
 
     Also supports legacy/alternate names:
-    - GDRIVE_SERVICE_ACCOUNT_JSON
-    - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64
+      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON (raw)          [optional alias]
+      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64         [optional alias]
+      - GDRIVE_SERVICE_ACCOUNT_JSON
+      - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64
 
-    Handles private_key formatting where newlines are stored as '\\n'.
+    IMPORTANT FIX:
+      - DO NOT replace '\\n' -> '\n' before json.loads().
+        That breaks valid JSON and causes "Invalid control character".
+      - Instead: json.loads() first, then fix private_key if needed.
     """
+    # 1) Prefer BASE64 first
     raw_b64 = _env_first(
         "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+        "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
         "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
     )
-    raw = _env_first(
-        "GOOGLE_SERVICE_ACCOUNT_JSON",
-        "GDRIVE_SERVICE_ACCOUNT_JSON",
-    )
 
+    raw = ""
     if raw_b64:
         try:
-            decoded = base64.b64decode(raw_b64).decode("utf-8")
-            raw = decoded.strip()
+            raw = base64.b64decode(raw_b64).decode("utf-8").strip()
         except Exception as e:
             raise RuntimeError(f"Invalid SERVICE_ACCOUNT_JSON_BASE64: {e}")
+
+    # 2) Fallback to RAW only if base64 is missing
+    if not raw:
+        raw = _env_first(
+            "GOOGLE_SERVICE_ACCOUNT_JSON",
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
+            "GDRIVE_SERVICE_ACCOUNT_JSON",
+        )
 
     if not raw:
         raise RuntimeError(
             "Missing Google service account credentials. "
-            "Set GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 "
-            "or GDRIVE_SERVICE_ACCOUNT_JSON / GDRIVE_SERVICE_ACCOUNT_JSON_BASE64."
+            "Set GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended) or GOOGLE_SERVICE_ACCOUNT_JSON. "
+            "Also supported: GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON(_BASE64), GDRIVE_SERVICE_ACCOUNT_JSON(_BASE64)."
         )
 
-    # Fix common ENV escaping issues
-    raw_fixed = raw.replace("\\n", "\n")
-
+    # Parse JSON as-is (do NOT pre-replace \\n)
     try:
-        info = json.loads(raw_fixed)
+        info = json.loads(raw)
     except Exception as e:
         raise RuntimeError(f"Service account JSON is not valid JSON: {e}")
 
+    # Fix private_key if it was double-escaped (e.g. contains literal "\\n")
     pk = info.get("private_key")
-    if isinstance(pk, str):
+    if isinstance(pk, str) and "\\n" in pk:
         info["private_key"] = pk.replace("\\n", "\n")
 
     return info
@@ -88,10 +101,12 @@ def drive_enabled() -> bool:
     """
     has_creds = bool(
         _env_first(
-            "GOOGLE_SERVICE_ACCOUNT_JSON",
-            "GDRIVE_SERVICE_ACCOUNT_JSON",
             "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
             "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
+            "GOOGLE_SERVICE_ACCOUNT_JSON",
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
+            "GDRIVE_SERVICE_ACCOUNT_JSON",
         )
     )
     has_folder = bool(_drive_folder_id())
@@ -111,18 +126,25 @@ def drive_file_view_url(file_id: str) -> str:
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 
+def drive_file_embed_url(file_id: str) -> str:
+    # Best for <img src="..."> embedding
+    return f"https://drive.google.com/uc?export=view&id={file_id}"
+
+
 def upload_file_to_drive(
     file_storage,
     filename: str,
     *,
     folder_id: Optional[str] = None,
     make_public: bool = True,
-) -> str:
+) -> Dict[str, str]:
     """
-    Uploads a Flask FileStorage to Google Drive and returns the created file_id (string).
+    Uploads a Flask FileStorage to Google Drive.
 
-    - Stores the file in GOOGLE_DRIVE_FOLDER_ID (or GDRIVE_FOLDER_ID).
-    - If make_public=True, sets "anyone with the link can read".
+    Returns a dict:
+      - file_id
+      - view_url
+      - download_url (embed-friendly)
     """
     if file_storage is None:
         raise ValueError("file_storage is None")
@@ -163,4 +185,8 @@ def upload_file_to_drive(
             supportsAllDrives=True,
         ).execute()
 
-    return file_id
+    return {
+        "file_id": file_id,
+        "view_url": drive_file_view_url(file_id),
+        "download_url": drive_file_embed_url(file_id),
+    }
