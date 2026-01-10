@@ -8,6 +8,7 @@
 import os
 import time
 import secrets
+import re
 from datetime import datetime, timezone
 
 from flask import (
@@ -95,10 +96,10 @@ def _public_media_url(stored_value: str):
     """
     Converts what's stored in DB into a usable URL.
 
-    - If it's already a URL (Google Drive), return it.
-    - If it's a raw Drive file_id (legacy), convert it to a Drive URL.
-    - If it's a local filename AND it exists, return a local URL.
-    - If local filename is missing (common on Render), return empty string to avoid 404 spam.
+    Accepts:
+      - already-a-URL (Google Drive, etc.) -> return it
+      - Drive file_id -> convert to https://drive.google.com/uc?export=view&id=...
+      - local filename -> /static/uploads/<file>
     """
     v = (stored_value or "").strip()
     if not v:
@@ -106,9 +107,8 @@ def _public_media_url(stored_value: str):
     if _is_url(v):
         return v
     if _looks_like_drive_file_id(v):
-        return _drive_uc_url(v)
-    if _local_upload_exists(v):
-        return url_for("static", filename=f"uploads/{v}")
+        return _drive_uc_view(v)
+    return url_for("static", filename=f"uploads/{v}")
     return ""
 def _save_to_storage(file_storage, filename: str) -> str:
     """
