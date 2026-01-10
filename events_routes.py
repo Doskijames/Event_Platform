@@ -11,7 +11,7 @@ from werkzeug.utils import secure_filename
 
 # --- Google Drive integration (supports BOTH env styles: GOOGLE_* and GDRIVE_*) ---
 try:
-    from gdrive_storage import drive_enabled, upload_filestorage_to_drive
+    from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
     upload_filestorage_to_drive = None
