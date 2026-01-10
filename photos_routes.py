@@ -17,7 +17,7 @@ from events_routes import get_event_by_slug, get_event_sections, can_manage_even
 
 # ✅ Drive helpers (from your gdrive_storage.py)
 try:
-    from gdrive_storage import drive_enabled, upload_filestorage_to_drive
+    from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
     upload_filestorage_to_drive = None
