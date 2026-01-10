@@ -394,8 +394,9 @@ a{ color:inherit; text-decoration:none; }
 .joy-hero-img{
   width:100%;
   height:440px;
-  object-fit:cover;
-  display:block;
+  object-fit: contain;     /* <-- zooms out (shows whole image) */
+  object-position: center;
+  display: block;
   filter:saturate(1.02) contrast(1.02);
 }
 .joy-hero-placeholder{
