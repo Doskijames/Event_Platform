@@ -1,13 +1,24 @@
-{# templates/_media.html #}
-{% macro media_url(stored_value) -%}
-  {%- set v = (stored_value or '') | trim -%}
+{# templates/_media.html
+   Single source of truth for turning DB values into usable URLs.
+   - URLs (http/https): return directly (with Google Drive normalization)
+   - Filenames: /static/uploads/<name>
+#}
+
+{% macro media_url(value) -%}
+  {%- set v = (value or '') | trim -%}
   {%- if not v -%}
     {{ '' }}
   {%- elif v.startswith('http://') or v.startswith('https://') -%}
-    {{ v }}
-  {%- elif v|length >= 20 and ('/' not in v) and ('.' not in v) -%}
-    {# Heuristic: treat as Drive file_id #}
-    {{ 'https://drive.google.com/uc?export=view&id=' ~ v }}
+    {# --- Normalize Google Drive URLs to a reliable <img> URL --- #}
+    {%- if 'drive.google.com/file/d/' in v -%}
+      {%- set fid = v.split('drive.google.com/file/d/')[1].split('/')[0] -%}
+      https://drive.usercontent.google.com/download?id={{ fid }}&export=view
+    {%- elif 'drive.google.com/uc' in v and 'id=' in v -%}
+      {%- set fid = v.split('id=')[1].split('&')[0] -%}
+      https://drive.usercontent.google.com/download?id={{ fid }}&export=view
+    {%- else -%}
+      {{ v }}
+    {%- endif -%}
   {%- else -%}
     {{ url_for('static', filename='uploads/' ~ v) }}
   {%- endif -%}
