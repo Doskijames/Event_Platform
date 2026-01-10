@@ -335,86 +335,86 @@ def register_event_routes(app):
     def _inject_media_url():
         return {"resolve_media_url": resolve_media_url}
 
-@app.get("/media/drive/<file_id>")
-def drive_media(file_id: str):
-    """Proxy Drive media through this app so <img> always works."""
-    fid = (file_id or "").strip()
-    if not fid or not _looks_like_drive_file_id(fid):
-        abort(404)
+    @app.get("/media/drive/<file_id>")
+    def drive_media(file_id: str):
+        """Proxy Drive media through this app so <img> always works."""
+        fid = (file_id or "").strip()
+        if not fid or not _looks_like_drive_file_id(fid):
+            abort(404)
 
-    if not drive_enabled() or get_drive_service is None:
-        # Fallback to direct link if Drive isn't configured
-        return redirect(drive_file_embed_url(fid))
+        if not drive_enabled() or get_drive_service is None:
+            # Fallback to direct link if Drive isn't configured
+            return redirect(drive_file_embed_url(fid))
 
-    try:
-        service = get_drive_service()
-        meta = service.files().get(fileId=fid, fields="mimeType,name").execute()
-        mime = (meta or {}).get("mimeType") or "application/octet-stream"
+        try:
+            service = get_drive_service()
+            meta = service.files().get(fileId=fid, fields="mimeType,name").execute()
+            mime = (meta or {}).get("mimeType") or "application/octet-stream"
 
-        # Stream download to memory (images are small)
-        from googleapiclient.http import MediaIoBaseDownload
+            # Stream download to memory (images are small)
+            from googleapiclient.http import MediaIoBaseDownload
 
-        request = service.files().get_media(fileId=fid)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            _status, done = downloader.next_chunk()
+            request = service.files().get_media(fileId=fid)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _status, done = downloader.next_chunk()
 
-        data = fh.getvalue()
-        resp = make_response(data)
-        resp.headers["Content-Type"] = mime
-        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        return resp
-    except Exception as e:
-        current_app.logger.exception("Drive proxy failed for %s: %s", fid, e)
-        abort(404)
+            data = fh.getvalue()
+            resp = make_response(data)
+            resp.headers["Content-Type"] = mime
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return resp
+        except Exception as e:
+            current_app.logger.exception("Drive proxy failed for %s: %s", fid, e)
+            abort(404)
 
 
 
-    @app.route("/events")
-    def events():
-        rows = get_db().execute("SELECT * FROM events ORDER BY created_at DESC").fetchall()
-        return render_template("events.html", user=current_user(), events=rows)
+        @app.route("/events")
+        def events():
+            rows = get_db().execute("SELECT * FROM events ORDER BY created_at DESC").fetchall()
+            return render_template("events.html", user=current_user(), events=rows)
 
-    @app.route("/events/create", methods=["GET", "POST"])
-    @login_required
-    def create_event():
-        u = current_user()
-        if request.method == "POST":
-            name = (request.form.get("name") or "").strip()
-            date_iso = (request.form.get("date_iso") or "").strip()
-            location = (request.form.get("location") or "").strip()
-            description = (request.form.get("description") or "").strip()
-            passcode = (request.form.get("passcode") or "").strip()
+        @app.route("/events/create", methods=["GET", "POST"])
+        @login_required
+        def create_event():
+            u = current_user()
+            if request.method == "POST":
+                name = (request.form.get("name") or "").strip()
+                date_iso = (request.form.get("date_iso") or "").strip()
+                location = (request.form.get("location") or "").strip()
+                description = (request.form.get("description") or "").strip()
+                passcode = (request.form.get("passcode") or "").strip()
 
-            if not name or not date_iso or not location or not description:
-                flash("Please fill all required fields.")
-                return redirect(url_for("create_event"))
+                if not name or not date_iso or not location or not description:
+                    flash("Please fill all required fields.")
+                    return redirect(url_for("create_event"))
 
-            if not passcode:
-                passcode = secrets.token_hex(3).upper()
+                if not passcode:
+                    passcode = secrets.token_hex(3).upper()
 
-            slug = unique_slug(slugify(name))
+                slug = unique_slug(slugify(name))
 
-            db = get_db()
-            now = datetime.now(timezone.utc).isoformat()
-            db.execute(
-                """
-                INSERT INTO events(slug, name, date_iso, location, description, passcode, owner_user_id, cover_image, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
-                """,
-                (slug, name, date_iso, location, description, passcode, u["id"], "", now),
-            )
-            db.commit()
+                db = get_db()
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    """
+                    INSERT INTO events(slug, name, date_iso, location, description, passcode, owner_user_id, cover_image, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    """,
+                    (slug, name, date_iso, location, description, passcode, u["id"], "", now),
+                )
+                db.commit()
 
-            new_event = get_event_by_slug(slug)
-            ensure_default_sections(new_event["id"])
+                new_event = get_event_by_slug(slug)
+                ensure_default_sections(new_event["id"])
 
-            flash(f"Event created! Passcode: {passcode}")
-            return redirect(url_for("events"))
+                flash(f"Event created! Passcode: {passcode}")
+                return redirect(url_for("events"))
 
-        return render_template("create_event.html", user=current_user())
+            return render_template("create_event.html", user=current_user())
 
     @app.route("/events/<slug>", methods=["GET", "POST"])
     def event_gate(slug):
