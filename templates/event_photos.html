@@ -53,7 +53,7 @@
           <div class="slide-wrap">
             {% for p in photos %}
               <img class="slide {% if loop.first %}active{% endif %}"
-                   src="{{ media_url(p.file_name) }}"
+                   src=<img src="{{ p['file_url'] }}"
                    alt="Photo {{ loop.index }}">
             {% endfor %}
           </div>
@@ -68,7 +68,7 @@
         <div class="grid">
           {% for p in photos %}
             <button class="thumb" type="button" data-idx="{{ loop.index0 }}">
-              <img src="{{ media_url(p.file_name) }}" alt="thumb {{ loop.index }}">
+              <img src= <img src="{{ p['file_url'] }}" alt="Photo">
             </button>
           {% endfor %}
         </div>
