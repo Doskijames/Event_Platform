@@ -58,21 +58,58 @@ def _is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
 
 
+def _looks_like_drive_file_id(s: str) -> bool:
+    """Heuristic: DB may contain a raw Drive file_id (legacy)."""
+    v = (s or "").strip()
+    if not v:
+        return False
+    if _is_url(v):
+        return False
+    if "/" in v or "\\" in v:
+        return False
+    if "." in v:  # local filename usually has extension
+        return False
+    if len(v) < 18 or len(v) > 200:
+        return False
+    for ch in v:
+        if not (ch.isalnum() or ch in "-_"):
+            return False
+    return True
+
+
+def _local_upload_exists(filename: str) -> bool:
+    """Return True if a legacy local upload still exists on disk."""
+    fn = (filename or "").strip()
+    if not fn or _is_url(fn) or _looks_like_drive_file_id(fn):
+        return False
+    try:
+        base = current_app.config.get("UPLOAD_FOLDER") or ""
+        if not base:
+            return False
+        return os.path.exists(os.path.join(base, fn))
+    except Exception:
+        return False
+
+
 def _public_media_url(stored_value: str):
     """
     Converts what's stored in DB into a usable URL.
 
     - If it's already a URL (Google Drive), return it.
-    - If it's a local filename, return a local URL (legacy support).
+    - If it's a raw Drive file_id (legacy), convert it to a Drive URL.
+    - If it's a local filename AND it exists, return a local URL.
+    - If local filename is missing (common on Render), return empty string to avoid 404 spam.
     """
     v = (stored_value or "").strip()
     if not v:
         return ""
     if _is_url(v):
         return v
-    return url_for("static", filename=f"uploads/{v}")
-
-
+    if _looks_like_drive_file_id(v):
+        return _drive_uc_url(v)
+    if _local_upload_exists(v):
+        return url_for("static", filename=f"uploads/{v}")
+    return ""
 def _save_to_storage(file_storage, filename: str) -> str:
     """
     Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
