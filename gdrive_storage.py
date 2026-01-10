@@ -1,4 +1,4 @@
-# gdrive_storage.py (FULL - supports GOOGLE_* and GDRIVE_* env vars) ✅ FIXED
+# gdrive_storage.py (FULL - supports GOOGLE_* and GDRIVE_* env vars + Base64 + returns URLs)
 import os
 import io
 import json
@@ -8,14 +8,13 @@ from typing import Optional, Dict, Any
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.errors import HttpError
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
 def _env_first(*names: str) -> str:
-    """
-    Returns the first non-empty environment variable value from the provided names.
-    """
+    """Return first non-empty env var value from names."""
     for n in names:
         v = os.getenv(n, "")
         if v and v.strip():
@@ -23,90 +22,80 @@ def _env_first(*names: str) -> str:
     return ""
 
 
+def _drive_folder_id() -> str:
+    """Supports both GOOGLE_DRIVE_FOLDER_ID and GDRIVE_FOLDER_ID."""
+    return _env_first("GOOGLE_DRIVE_FOLDER_ID", "GDRIVE_FOLDER_ID")
+
+
 def _load_service_account_info() -> Dict[str, Any]:
     """
     Loads Google service account JSON from env.
 
-    Preferred:
-      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
-
-    Supported env vars (choose ONE):
+    Supported (choose ONE):
       - GOOGLE_SERVICE_ACCOUNT_JSON: raw JSON string
-      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: base64 encoded JSON string
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: base64 JSON string
 
     Also supports legacy/alternate names:
-      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON (raw)          [optional alias]
-      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64         [optional alias]
       - GDRIVE_SERVICE_ACCOUNT_JSON
       - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64
 
-    IMPORTANT FIX:
-      - DO NOT replace '\\n' -> '\n' before json.loads().
-        That breaks valid JSON and causes "Invalid control character".
-      - Instead: json.loads() first, then fix private_key if needed.
+    Notes:
+      - We do NOT try to "fix" raw JSON beyond \\n -> \n
+      - Base64 is recommended on Render to avoid newline/control character issues.
     """
-    # 1) Prefer BASE64 first
     raw_b64 = _env_first(
         "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
-        "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
         "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
+        # optional aliases some people use:
+        "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
+        "GOOGLE_SERVICE_ACCOUNT_B64",
+    )
+    raw = _env_first(
+        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "GDRIVE_SERVICE_ACCOUNT_JSON",
+        # optional alias some people use:
+        "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
     )
 
-    raw = ""
     if raw_b64:
         try:
             raw = base64.b64decode(raw_b64).decode("utf-8").strip()
         except Exception as e:
             raise RuntimeError(f"Invalid SERVICE_ACCOUNT_JSON_BASE64: {e}")
 
-    # 2) Fallback to RAW only if base64 is missing
-    if not raw:
-        raw = _env_first(
-            "GOOGLE_SERVICE_ACCOUNT_JSON",
-            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
-            "GDRIVE_SERVICE_ACCOUNT_JSON",
-        )
-
     if not raw:
         raise RuntimeError(
             "Missing Google service account credentials. "
-            "Set GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended) or GOOGLE_SERVICE_ACCOUNT_JSON. "
-            "Also supported: GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON(_BASE64), GDRIVE_SERVICE_ACCOUNT_JSON(_BASE64)."
+            "Set GOOGLE_SERVICE_ACCOUNT_JSON / GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 "
+            "or GDRIVE_SERVICE_ACCOUNT_JSON / GDRIVE_SERVICE_ACCOUNT_JSON_BASE64."
         )
 
-    # Parse JSON as-is (do NOT pre-replace \\n)
+    # Common ENV escaping: private_key sometimes has literal '\n'
+    raw_fixed = raw.replace("\\n", "\n")
+
     try:
-        info = json.loads(raw)
+        info = json.loads(raw_fixed)
     except Exception as e:
         raise RuntimeError(f"Service account JSON is not valid JSON: {e}")
 
-    # Fix private_key if it was double-escaped (e.g. contains literal "\\n")
+    # Ensure private_key newlines are correct even if JSON parsed with \\n literals
     pk = info.get("private_key")
-    if isinstance(pk, str) and "\\n" in pk:
+    if isinstance(pk, str):
         info["private_key"] = pk.replace("\\n", "\n")
 
     return info
 
 
-def _drive_folder_id() -> str:
-    """
-    Supports both GOOGLE_DRIVE_FOLDER_ID and GDRIVE_FOLDER_ID.
-    """
-    return _env_first("GOOGLE_DRIVE_FOLDER_ID", "GDRIVE_FOLDER_ID")
-
-
 def drive_enabled() -> bool:
-    """
-    Returns True when Drive integration is properly configured.
-    """
+    """True when Drive integration is configured."""
     has_creds = bool(
         _env_first(
-            "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
-            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
-            "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
             "GOOGLE_SERVICE_ACCOUNT_JSON",
-            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
             "GDRIVE_SERVICE_ACCOUNT_JSON",
+            "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64",
+            "GDRIVE_SERVICE_ACCOUNT_JSON_BASE64",
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON",
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64",
         )
     )
     has_folder = bool(_drive_folder_id())
@@ -114,20 +103,22 @@ def drive_enabled() -> bool:
 
 
 def get_drive_service():
-    """
-    Builds a Google Drive API service using service account credentials.
-    """
+    """Builds a Google Drive API service using service account credentials."""
     info = _load_service_account_info()
     creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def drive_file_view_url(file_id: str) -> str:
+    """Human-friendly view page."""
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 
 def drive_file_embed_url(file_id: str) -> str:
-    # Best for <img src="..."> embedding
+    """
+    Direct-ish link good for <img src="...">.
+    (Drive can still apply some restrictions depending on settings, but this is the usual best.)
+    """
     return f"https://drive.google.com/uc?export=view&id={file_id}"
 
 
@@ -141,10 +132,18 @@ def upload_file_to_drive(
     """
     Uploads a Flask FileStorage to Google Drive.
 
-    Returns a dict:
-      - file_id
-      - view_url
-      - download_url (embed-friendly)
+    Returns a dict (so your routes can meta.get(...)):
+      {
+        "file_id": "...",
+        "view_url": "...",
+        "download_url": "..."   # embed-friendly URL
+      }
+
+    Notes:
+    - folder_id defaults to GOOGLE_DRIVE_FOLDER_ID (or GDRIVE_FOLDER_ID)
+    - If make_public=True, sets "anyone with the link can read"
+    - If you get 404 "File not found: <folderId>", the folder id is wrong OR
+      the service account lacks permission to that folder (share it with client_email).
     """
     if file_storage is None:
         raise ValueError("file_storage is None")
@@ -155,7 +154,7 @@ def upload_file_to_drive(
     if not folder_id:
         raise RuntimeError("Missing Drive folder ID. Set GOOGLE_DRIVE_FOLDER_ID or GDRIVE_FOLDER_ID.")
 
-    # Read file bytes
+    # Read file bytes (and reset stream so Flask/Werkzeug won't break later)
     data = file_storage.read()
     try:
         file_storage.stream.seek(0)
@@ -168,22 +167,32 @@ def upload_file_to_drive(
     metadata = {"name": filename, "parents": [folder_id]}
     media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mime_type, resumable=False)
 
-    created = service.files().create(
-        body=metadata,
-        media_body=media,
-        fields="id",
-        supportsAllDrives=True,
-    ).execute()
+    try:
+        created = service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+    except HttpError as e:
+        # Keep message helpful for the most common cause: wrong folder id / no permission
+        raise RuntimeError(f"Drive upload failed (create). Check folder_id permission. {e}") from e
 
     file_id = created["id"]
 
     if make_public:
-        service.permissions().create(
-            fileId=file_id,
-            body={"type": "anyone", "role": "reader"},
-            fields="id",
-            supportsAllDrives=True,
-        ).execute()
+        try:
+            service.permissions().create(
+                fileId=file_id,
+                body={"type": "anyone", "role": "reader"},
+                fields="id",
+                supportsAllDrives=True,
+            ).execute()
+        except HttpError as e:
+            # Upload succeeded, but permission setting failed (still return links)
+            # You can decide if you want to raise instead.
+            # For now: raise so you notice misconfig.
+            raise RuntimeError(f"Drive upload succeeded but permission set failed. {e}") from e
 
     return {
         "file_id": file_id,
