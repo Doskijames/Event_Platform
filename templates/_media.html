@@ -1,38 +1,26 @@
 {# templates/_media.html #}
-{# Usage:
-   {% from "_media.html" import media_url %}
-   <img src="{{ media_url(row.cover_image) }}">
-#}
-
-{% macro _extract_drive_id(v) -%}
-  {%- if not v -%}{%- else -%}
-    {%- set s = v|string -%}
-    {%- if "id=" in s -%}
-      {%- set parts = s.split("id=") -%}
-      {%- set tail = parts[-1] -%}
-      {%- set fid = tail.split("&")[0] -%}
-      {{- fid -}}
-    {%- elif "/file/d/" in s -%}
-      {%- set fid = s.split("/file/d/")[-1].split("/")[0] -%}
-      {{- fid -}}
-    {%- else -%}
-      {{- s -}}
-    {%- endif -%}
-  {%- endif -%}
-{%- endmacro %}
+{# Single source of truth for turning DB "image" values into a usable <img src> URL. #}
 
 {% macro media_url(value) -%}
-  {%- set v = (value or "")|string|trim -%}
+  {%- set v = (value or '')|trim -%}
   {%- if not v -%}
-    {{- "" -}}
-  {%- elif v.startswith("http://") or v.startswith("https://") -%}
-    {%- if "drive.google.com" in v or "drive.usercontent.google.com" in v -%}
-      {%- set fid = _extract_drive_id(v) -%}
-      {{- "/media/drive/" ~ fid -}}
+    {{ '' }}
+  {%- elif v.startswith('http://') or v.startswith('https://') -%}
+    {# If it's a Drive URL with an id, route through our proxy endpoint #}
+    {%- set file_id = '' -%}
+    {%- if 'id=' in v -%}
+      {%- set file_id = v.split('id=')[1].split('&')[0] -%}
+    {%- elif '/d/' in v -%}
+      {%- set file_id = v.split('/d/')[1].split('/')[0] -%}
+    {%- endif -%}
+
+    {%- if file_id -%}
+      {{ url_for('media_drive', file_id=file_id) }}
     {%- else -%}
-      {{- v -}}
+      {{ v }}
     {%- endif -%}
   {%- else -%}
-    {{- url_for("static", filename="uploads/" ~ v) -}}
+    {# A bare filename: serve via /media/<filename> which falls back to Drive if needed #}
+    {{ url_for('media_by_name', filename=v) }}
   {%- endif -%}
 {%- endmacro %}
