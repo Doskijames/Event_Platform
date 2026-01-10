@@ -350,7 +350,7 @@ def register_event_routes(app):
         if request.method == "POST":
             passcode = (request.form.get("passcode") or "").strip()
             if passcode == (event.get("passcode") or event["passcode"]):
-                session[event_session_key(event["id"]))] = True
+                session[event_session_key(event["id"])] = True
                 return redirect(url_for("event_section", slug=slug, section_key="home"))
             flash("Incorrect passcode. Please try again.")
 
