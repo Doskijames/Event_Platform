@@ -12,7 +12,6 @@
 
 import os
 import secrets
-import re
 from datetime import datetime, timezone, datetime as dt_cls
 
 from flask import (
@@ -166,33 +165,6 @@ def _looks_like_drive_file_id(s: str) -> bool:
         if not (ch.isalnum() or ch in "-_"):
             return False
     return True
-def _looks_like_drive_file_id(s: str) -> bool:
-    """
-    Heuristic: Drive file IDs are usually 20+ chars of [A-Za-z0-9_-].
-    We use this to support DB values that store only the file_id.
-    """
-    if not s:
-        return False
-    s = s.strip()
-    return bool(re.fullmatch(r"[A-Za-z0-9_-]{20,}", s))
-
-
-def _normalize_media_value(v: str) -> str:
-    """
-    Accepts:
-      - full URLs (https://...)
-      - Drive file_id (returns https://drive.google.com/uc?export=view&id=...)
-      - local filenames (returned as-is)
-    """
-    v = (v or "").strip()
-    if not v:
-        return ""
-    if _is_url(v):
-        return v
-    if _looks_like_drive_file_id(v):
-        return _drive_uc_view(v)
-    return v
-
 
 
 def _local_upload_exists(filename: str) -> bool:
@@ -211,28 +183,19 @@ def _local_upload_exists(filename: str) -> bool:
 
 def media_url(stored_value: str):
     """
-    Template helper.
-
-    - If stored_value is a URL, return it.
-    - If it's a Drive file_id, convert it to a Drive view URL for <img src="...">.
-    - If it's a local filename and exists, return /static/uploads/<file>.
-    - If it's a local filename that does NOT exist (common on Render), return "".
+    If stored_value is already a URL (Drive), return it.
+    If it's a raw Drive file_id (legacy), convert to embed-friendly URL.
+    Else treat it as a local filename under /static/uploads/ (only if file exists).
     """
-    v0 = _normalize_media_value(stored_value)
-    if not v0:
+    v = (stored_value or "").strip()
+    if not v:
         return ""
-    if _is_url(v0):
-        return v0
-
-    # Local fallback (legacy)
-    v = v0
-    try:
-        local_path = os.path.join(current_app.config.get("UPLOAD_FOLDER", ""), v)
-        if local_path and os.path.exists(local_path):
-            return url_for("static", filename=f"uploads/{v}")
-    except Exception:
-        pass
-    return ""
+    if _is_url(v):
+        return v
+    if _looks_like_drive_file_id(v):
+        return _drive_uc_view(v)
+    if _local_upload_exists(v):
+        return url_for("static", filename=f"uploads/{v}")
     # File missing (Render filesystem is ephemeral) -> don't show broken image
     return ""
 def _drive_ok() -> bool:
@@ -302,8 +265,7 @@ def _drive_upload_image_and_get_url(file_storage, unique_name: str) -> str:
         if isinstance(res, dict):
             url = (res.get("download_url") or "").strip() or (res.get("view_url") or "").strip()
             if url and url.startswith("http"):
-                current_app.logger.warning("Drive upload ok. saved_url=%s", url)
-            return url
+                return url
 
             file_id = (res.get("file_id") or "").strip()
             if file_id:
@@ -473,7 +435,6 @@ def register_event_routes(app):
 
         # Try Drive first (stores URL)
         stored_value = _drive_upload_image_and_get_url(file, unique_name)
-        stored_value = _normalize_media_value(stored_value)
 
         # Local fallback (may disappear on Render redeploy)
         if not stored_value:
