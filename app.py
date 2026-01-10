@@ -9,6 +9,8 @@ from auth_routes import register_auth_routes, current_user  # ✅ import current
 from events_routes import register_event_routes
 from photos_routes import register_photo_routes
 from rsvp_routes import register_rsvp_routes
+from drive_media_routes import register_drive_media_routes
+
 
 
 def create_app():
@@ -36,6 +38,7 @@ def create_app():
     register_event_routes(app)
     register_photo_routes(app)
     register_rsvp_routes(app)
+    register_drive_media_routes(app)
 
     # ---------- JINJA HELPERS (SAFE) ----------
     @app.context_processor
