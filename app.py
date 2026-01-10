@@ -5,12 +5,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db_core import init_db, ensure_default_admin, close_db
-from auth_routes import register_auth_routes, current_user  # ✅ import current_user
+from auth_routes import register_auth_routes, current_user
 from events_routes import register_event_routes
 from photos_routes import register_photo_routes
 from rsvp_routes import register_rsvp_routes
-from drive_media_routes import register_drive_media_routes
 
+# Optional: Drive proxy routes (recommended)
+try:
+    from drive_media_routes import register_drive_media_routes
+except Exception:
+    register_drive_media_routes = None
 
 
 def create_app():
@@ -24,7 +28,7 @@ def create_app():
     app.config["DATABASE"] = os.path.abspath(db_path)
     print("✅ DATABASE:", app.config["DATABASE"])
 
-    # Uploads
+    # Uploads (local fallback)
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     upload_folder = os.path.join(BASE_DIR, "static", "uploads")
     os.makedirs(upload_folder, exist_ok=True)
@@ -38,9 +42,11 @@ def create_app():
     register_event_routes(app)
     register_photo_routes(app)
     register_rsvp_routes(app)
-    register_drive_media_routes(app)
 
-    # ---------- JINJA HELPERS (SAFE) ----------
+    if register_drive_media_routes:
+        register_drive_media_routes(app)
+
+    # ---------- JINJA HELPERS ----------
     @app.context_processor
     def inject_helpers():
         def has_endpoint(name: str) -> bool:
@@ -49,10 +55,9 @@ def create_app():
             except Exception:
                 return False
 
-        # ✅ user is now available in EVERY template (home included)
         return {
             "has_endpoint": has_endpoint,
-            "user": current_user()
+            "user": current_user(),
         }
 
     # Root URL → Home
@@ -70,11 +75,7 @@ def create_app():
         init_db()
         ensure_default_admin()
 
-    # --------------------
-    # Media URL helper (local uploads OR full URLs such as Google Drive links)
-    # --------------------
-    from flask import url_for
-
+    # Media URL helper (local uploads OR full URLs)
     def media_url(value: str) -> str:
         value = (value or "").strip()
         if not value:
@@ -85,8 +86,9 @@ def create_app():
 
     app.jinja_env.globals["media_url"] = media_url
 
-
     return app
+
+
 print(">>> app.py starting")
 app = create_app()
 print(">>> app created, starting server on http://127.0.0.1:5000")

@@ -12,23 +12,20 @@
 
 import os
 import secrets
-import re
-import io
 from datetime import datetime, timezone, datetime as dt_cls
 
 from flask import (
     render_template, request, redirect, url_for,
-    session, flash, abort, current_app, make_response, Response
+    session, flash, abort, current_app
 )
 from werkzeug.utils import secure_filename
 
 # Google Drive uploader (OAuth)
 try:
-    from gdrive_storage import drive_enabled, upload_file_to_drive, get_drive_service
+    from gdrive_storage import drive_enabled, upload_file_to_drive
 except Exception:
     drive_enabled = None
     upload_file_to_drive = None
-    get_drive_service = None
 
 from db_core import get_db, ensure_default_sections
 from utils_core import (
@@ -170,30 +167,6 @@ def _looks_like_drive_file_id(s: str) -> bool:
     return True
 
 
-def _extract_drive_file_id(value: str) -> str:
-    """Extract Drive file_id from common URL formats, or return ''."""
-    v = (value or "").strip()
-    if not v:
-        return ""
-
-    # Querystring patterns: ...?id=<ID> or ...&id=<ID>
-    m = re.search(r"(?:\?|&)id=([A-Za-z0-9_-]{10,})", v)
-    if m:
-        return m.group(1)
-
-    # /file/d/<ID>/...
-    m = re.search(r"/file/d/([A-Za-z0-9_-]{10,})", v)
-    if m:
-        return m.group(1)
-
-    # open?id=<ID>
-    m = re.search(r"open\?id=([A-Za-z0-9_-]{10,})", v)
-    if m:
-        return m.group(1)
-
-    return ""
-
-
 def _local_upload_exists(filename: str) -> bool:
     """Return True if a legacy local upload still exists on disk."""
     fn = (filename or "").strip()
@@ -208,36 +181,23 @@ def _local_upload_exists(filename: str) -> bool:
         return False
 
 
-def resolve_media_url(value: str) -> str:
-    """Return a browser-friendly URL for media stored as local filenames or Drive URLs/IDs."""
-    v = (value or "").strip()
+def media_url(stored_value: str):
+    """
+    If stored_value is already a URL (Drive), return it.
+    If it's a raw Drive file_id (legacy), convert to embed-friendly URL.
+    Else treat it as a local filename under /static/uploads/ (only if file exists).
+    """
+    v = (stored_value or "").strip()
     if not v:
         return ""
-
-    # If it's already a URL, normalize Drive links into our proxy where possible.
     if _is_url(v):
-        file_id = _extract_drive_file_id(v)
-        if file_id and _looks_like_drive_file_id(file_id):
-            try:
-                return url_for("drive_media", file_id=file_id)
-            except Exception:
-                # If url_for isn't available (very early init), fall back to direct view URL.
-                return drive_file_embed_url(file_id)
         return v
-
-    # If it's a bare Drive file id
     if _looks_like_drive_file_id(v):
-        try:
-            return url_for("drive_media", file_id=v)
-        except Exception:
-            return drive_file_embed_url(v)
-
-    # Otherwise treat it as a local filename under static/uploads
-    try:
+        return _drive_uc_view(v)
+    if _local_upload_exists(v):
         return url_for("static", filename=f"uploads/{v}")
-    except Exception:
-        return f"/static/uploads/{v}"
-
+    # File missing (Render filesystem is ephemeral) -> don't show broken image
+    return ""
 def _drive_ok() -> bool:
     """
     True if Drive uploader is available and OAuth env vars are present.
@@ -333,88 +293,51 @@ def register_event_routes(app):
     # Make media_url callable in ALL templates
     @app.context_processor
     def _inject_media_url():
-        return {"resolve_media_url": resolve_media_url}
+        return {"media_url": media_url}
 
-    @app.get("/media/drive/<file_id>")
-    def drive_media(file_id: str):
-        """Proxy Drive media through this app so <img> always works."""
-        fid = (file_id or "").strip()
-        if not fid or not _looks_like_drive_file_id(fid):
-            abort(404)
+    @app.route("/events")
+    def events():
+        rows = get_db().execute("SELECT * FROM events ORDER BY created_at DESC").fetchall()
+        return render_template("events.html", user=current_user(), events=rows)
 
-        if not drive_enabled() or get_drive_service is None:
-            # Fallback to direct link if Drive isn't configured
-            return redirect(drive_file_embed_url(fid))
+    @app.route("/events/create", methods=["GET", "POST"])
+    @login_required
+    def create_event():
+        u = current_user()
+        if request.method == "POST":
+            name = (request.form.get("name") or "").strip()
+            date_iso = (request.form.get("date_iso") or "").strip()
+            location = (request.form.get("location") or "").strip()
+            description = (request.form.get("description") or "").strip()
+            passcode = (request.form.get("passcode") or "").strip()
 
-        try:
-            service = get_drive_service()
-            meta = service.files().get(fileId=fid, fields="mimeType,name").execute()
-            mime = (meta or {}).get("mimeType") or "application/octet-stream"
+            if not name or not date_iso or not location or not description:
+                flash("Please fill all required fields.")
+                return redirect(url_for("create_event"))
 
-            # Stream download to memory (images are small)
-            from googleapiclient.http import MediaIoBaseDownload
+            if not passcode:
+                passcode = secrets.token_hex(3).upper()
 
-            request = service.files().get_media(fileId=fid)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _status, done = downloader.next_chunk()
+            slug = unique_slug(slugify(name))
 
-            data = fh.getvalue()
-            resp = make_response(data)
-            resp.headers["Content-Type"] = mime
-            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-            return resp
-        except Exception as e:
-            current_app.logger.exception("Drive proxy failed for %s: %s", fid, e)
-            abort(404)
+            db = get_db()
+            now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                """
+                INSERT INTO events(slug, name, date_iso, location, description, passcode, owner_user_id, cover_image, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                """,
+                (slug, name, date_iso, location, description, passcode, u["id"], "", now),
+            )
+            db.commit()
 
+            new_event = get_event_by_slug(slug)
+            ensure_default_sections(new_event["id"])
 
+            flash(f"Event created! Passcode: {passcode}")
+            return redirect(url_for("events"))
 
-        @app.route("/events")
-        def events():
-            rows = get_db().execute("SELECT * FROM events ORDER BY created_at DESC").fetchall()
-            return render_template("events.html", user=current_user(), events=rows)
-
-        @app.route("/events/create", methods=["GET", "POST"])
-        @login_required
-        def create_event():
-            u = current_user()
-            if request.method == "POST":
-                name = (request.form.get("name") or "").strip()
-                date_iso = (request.form.get("date_iso") or "").strip()
-                location = (request.form.get("location") or "").strip()
-                description = (request.form.get("description") or "").strip()
-                passcode = (request.form.get("passcode") or "").strip()
-
-                if not name or not date_iso or not location or not description:
-                    flash("Please fill all required fields.")
-                    return redirect(url_for("create_event"))
-
-                if not passcode:
-                    passcode = secrets.token_hex(3).upper()
-
-                slug = unique_slug(slugify(name))
-
-                db = get_db()
-                now = datetime.now(timezone.utc).isoformat()
-                db.execute(
-                    """
-                    INSERT INTO events(slug, name, date_iso, location, description, passcode, owner_user_id, cover_image, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?)
-                    """,
-                    (slug, name, date_iso, location, description, passcode, u["id"], "", now),
-                )
-                db.commit()
-
-                new_event = get_event_by_slug(slug)
-                ensure_default_sections(new_event["id"])
-
-                flash(f"Event created! Passcode: {passcode}")
-                return redirect(url_for("events"))
-
-            return render_template("create_event.html", user=current_user())
+        return render_template("create_event.html", user=current_user())
 
     @app.route("/events/<slug>", methods=["GET", "POST"])
     def event_gate(slug):
