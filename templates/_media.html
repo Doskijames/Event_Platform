@@ -1,10 +1,14 @@
-{% macro media_url(v) -%}
-  {% set s = (v or "") %}
-  {% if s.startswith("http://") or s.startswith("https://") %}
-    {{ s }}
-  {% elif s %}
-    {{ url_for("static", filename="uploads/" ~ s) }}
-  {% else %}
-    {{ "" }}
-  {% endif %}
+{# templates/_media.html #}
+{% macro media_url(stored_value) -%}
+  {%- set v = (stored_value or '') | trim -%}
+  {%- if not v -%}
+    {{ '' }}
+  {%- elif v.startswith('http://') or v.startswith('https://') -%}
+    {{ v }}
+  {%- elif v|length >= 20 and ('/' not in v) and ('.' not in v) -%}
+    {# Heuristic: treat as Drive file_id #}
+    {{ 'https://drive.google.com/uc?export=view&id=' ~ v }}
+  {%- else -%}
+    {{ url_for('static', filename='uploads/' ~ v) }}
+  {%- endif -%}
 {%- endmacro %}
