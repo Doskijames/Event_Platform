@@ -38,7 +38,7 @@
       <a class="event-card" href="{{ url_for('event_gate', slug=e.slug) }}">
         <div class="event-cover">
           {% if e.cover_image %}
-            <img src="{{ media_url(event['cover_image']) }}" alt="Event hero image">
+            <img src="{{ media_url(e['cover_image']) }}" alt="Event hero image">
             
           {% else %}
             <div class="event-cover-placeholder">No Cover Photo</div>
