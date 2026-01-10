@@ -1,25 +1,20 @@
-{# templates/_media.html
-   Single source of truth for turning DB values into usable URLs.
-   - URLs (http/https): return directly (with Google Drive normalization)
-   - Filenames: /static/uploads/<name>
-#}
-
-{% macro media_url(value) -%}
-  {%- set v = (value or '') | trim -%}
-  {%- if not v -%}
+{# templates/_media.html #}
+{% macro media_url(v) -%}
+  {%- set s = (v or '') | string -%}
+  {%- set s = s.strip() -%}
+  {%- if not s -%}
     {{ '' }}
-  {%- elif v.startswith('http://') or v.startswith('https://') -%}
-    {# --- Normalize Google Drive URLs to a reliable <img> URL --- #}
-    {%- if 'drive.google.com/file/d/' in v -%}
-      {%- set fid = v.split('drive.google.com/file/d/')[1].split('/')[0] -%}
-      https://drive.usercontent.google.com/download?id={{ fid }}&export=view
-    {%- elif 'drive.google.com/uc' in v and 'id=' in v -%}
-      {%- set fid = v.split('id=')[1].split('&')[0] -%}
-      https://drive.usercontent.google.com/download?id={{ fid }}&export=view
-    {%- else -%}
-      {{ v }}
-    {%- endif -%}
+  {%- elif s.startswith('gdrive:') -%}
+    {{ url_for('drive_media', file_id=s.split('gdrive:', 1)[1]) }}
+  {%- elif 'id=' in s -%}
+    {%- set fid = s.split('id=', 1)[1].split('&', 1)[0] -%}
+    {{ url_for('drive_media', file_id=fid) }}
+  {%- elif '/d/' in s -%}
+    {%- set fid = s.split('/d/', 1)[1].split('/', 1)[0] -%}
+    {{ url_for('drive_media', file_id=fid) }}
+  {%- elif s.startswith('http://') or s.startswith('https://') -%}
+    {{ s }}
   {%- else -%}
-    {{ url_for('static', filename='uploads/' ~ v) }}
+    {{ url_for('static', filename='uploads/' ~ s) }}
   {%- endif -%}
 {%- endmacro %}
