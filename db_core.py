@@ -1,9 +1,18 @@
-
 # db_core.py
+"""Database core + schema management.
+
+Supports BOTH:
+- SQLite (local dev / small deployments)
+- Postgres (Render / production)
+
+Key design:
+- Application code should call get_db() and use the returned adapter.
+- Do NOT open sqlite3 connections directly elsewhere (e.g. utils_core).
+"""
+
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Optional, Set
 
 from flask import current_app, g
 from werkzeug.security import generate_password_hash
@@ -15,37 +24,30 @@ import psycopg2.extras
 # ----------------------------
 # Small helpers
 # ----------------------------
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def using_postgres() -> bool:
-    return bool(os.getenv("DATABASE_URL"))
+    # Render typically provides DATABASE_URL.
+    return bool((os.getenv("DATABASE_URL") or "").strip())
 
 
 def _sqlite_db_path() -> str:
-    """
-    Prefer Flask config DATABASE, fallback to env var DATABASE_PATH, fallback to app.db.
-
-    NOTE: SQLite creates a NEW empty file if the path doesn't exist.
-    This is the root cause of "no such table: events" when deploys / instances change.
-    We guard against that elsewhere by ensuring schema exists on each connection.
-    """
+    """Prefer Flask config, fallback to env var, fallback to app.db."""
     try:
         p = current_app.config.get("DATABASE")
         if p:
             return p
     except Exception:
         pass
-    return os.path.abspath(os.getenv("DATABASE_PATH", "app.db"))
+
+    return os.path.abspath((os.getenv("DATABASE_PATH") or "app.db").strip())
 
 
 def row_get(row, key, default=None):
-    """
-    Works with:
-    - sqlite3.Row (SQLite)
-    - dict rows (Postgres RealDictCursor)
-    """
+    """Works with sqlite3.Row and dict rows (psycopg2 RealDictCursor)."""
     if row is None:
         return default
     if isinstance(row, dict):
@@ -61,21 +63,18 @@ def row_get(row, key, default=None):
 # ----------------------------
 # DB Adapter
 # ----------------------------
+
 class DB:
-    """
-    Adapter so the rest of your code can keep doing:
+    """Adapter so the rest of your code can keep doing:
+
       db = get_db()
-      db.execute(...)
+      cur = db.execute(...)
+      rows = cur.fetchall()
       db.commit()
-      db.close()
 
-    It auto-converts:
+    Also auto-converts:
       - SQLite placeholders '?' -> Postgres '%s'
-      - SQLite INSERT OR IGNORE -> Postgres ON CONFLICT DO NOTHING
-
-    Plus a safety net:
-      - If SQLite ever hits "no such table", we auto-create schema once and retry.
-        (This prevents production errors when a new empty DB file is created.)
+      - SQLite 'INSERT OR IGNORE' -> Postgres 'ON CONFLICT DO NOTHING'
     """
 
     def __init__(self, kind: str, conn):
@@ -89,7 +88,7 @@ class DB:
         # 1) placeholders
         sql = sql.replace("?", "%s")
 
-        # 2) Convert INSERT OR IGNORE to ON CONFLICT DO NOTHING
+        # 2) INSERT OR IGNORE
         if "INSERT OR IGNORE INTO" in sql:
             sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
             sql = sql.strip().rstrip(";")
@@ -98,30 +97,11 @@ class DB:
         return sql
 
     def execute(self, sql: str, params=None):
-        sql_fixed = self._fix_sql(sql)
+        sql = self._fix_sql(sql)
         params = params or ()
-
         cur = self.conn.cursor()
-        try:
-            cur.execute(sql_fixed, params)
-            return cur
-        except sqlite3.OperationalError as e:
-            # Only for SQLite, and only for missing tables. Don't intercept schema creation itself.
-            msg = str(e).lower()
-            is_create = sql_fixed.lstrip().upper().startswith(("CREATE TABLE", "PRAGMA", "BEGIN", "COMMIT"))
-            if self.kind == "sqlite" and (not is_create) and ("no such table" in msg):
-                # Create schema + retry once
-                try:
-                    ensure_schema(self)
-                except Exception:
-                    # If schema creation fails, raise original
-                    raise
-
-                cur = self.conn.cursor()
-                cur.execute(sql_fixed, params)
-                return cur
-
-            raise
+        cur.execute(sql, params)
+        return cur
 
     def commit(self):
         self.conn.commit()
@@ -135,14 +115,8 @@ class DB:
 
 def _connect_sqlite() -> DB:
     path = _sqlite_db_path()
-
-    # Ensure directory exists (useful if DATABASE points into a folder)
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-    except Exception:
-        pass
-
-    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
+    # check_same_thread False helps in some hosting environments
+    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA journal_mode = WAL;")
@@ -150,85 +124,14 @@ def _connect_sqlite() -> DB:
 
 
 def _connect_postgres() -> DB:
-    db_url = os.environ["DATABASE_URL"]
+    db_url = os.environ["DATABASE_URL"].strip()
     conn = psycopg2.connect(db_url, cursor_factory=psycopg2.extras.RealDictCursor)
     return DB("postgres", conn)
 
 
-# ----------------------------
-# Schema guards (NEW)
-# ----------------------------
-def _sqlite_table_exists(db: DB, table_name: str) -> bool:
-    try:
-        cur = db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
-            (table_name,),
-        )
-        return cur.fetchone() is not None
-    except Exception:
-        return False
-
-
-def _postgres_table_exists(db: DB, table_name: str) -> bool:
-    try:
-        cur = db.execute(
-            """
-            SELECT 1
-            FROM information_schema.tables
-            WHERE table_schema='public' AND table_name=%s
-            LIMIT 1
-            """,
-            (table_name,),
-        )
-        return cur.fetchone() is not None
-    except Exception:
-        return False
-
-
-def schema_ready(db: DB) -> bool:
-    """
-    True if core tables exist.
-    """
-    if db.kind == "postgres":
-        return _postgres_table_exists(db, "users") and _postgres_table_exists(db, "events")
-    return _sqlite_table_exists(db, "users") and _sqlite_table_exists(db, "events")
-
-
-def ensure_schema(db: DB):
-    """
-    Ensure schema exists for the current DB connection.
-    Safe to call many times.
-    """
-    if schema_ready(db):
-        return
-
-    if db.kind == "postgres":
-        _create_schema_postgres(db)
-    else:
-        _create_schema_sqlite(db)
-
-
-# ----------------------------
-# Flask DB access
-# ----------------------------
 def get_db() -> DB:
-    """
-    Returns a request-scoped DB connection (stored on flask.g).
-
-    Key fix:
-    - After connecting, ensure_schema() runs once per request context.
-      This prevents "sqlite3.OperationalError: no such table: events" even if
-      Render created a fresh empty SQLite file.
-    """
     if not hasattr(g, "db") or g.db is None:
         g.db = _connect_postgres() if using_postgres() else _connect_sqlite()
-
-    if not getattr(g, "_schema_checked", False):
-        try:
-            ensure_schema(g.db)
-        finally:
-            g._schema_checked = True
-
     return g.db
 
 
@@ -242,12 +145,10 @@ def close_db(e=None):
 # ----------------------------
 # Schema Introspection
 # ----------------------------
-def get_table_columns(db: DB, table_name: str) -> Set[str]:
-    """
-    Returns a set of column names for a table.
-    Works for both SQLite and Postgres.
-    """
-    cols: Set[str] = set()
+
+def get_table_columns(db: DB, table_name: str) -> set[str]:
+    """Return a set of column names for a table (SQLite or Postgres)."""
+    cols: set[str] = set()
 
     if db.kind == "postgres":
         cur = db.execute(
@@ -273,6 +174,7 @@ def get_table_columns(db: DB, table_name: str) -> Set[str]:
 # ----------------------------
 # Schema creation
 # ----------------------------
+
 def _create_schema_sqlite(db: DB):
     db.execute(
         """
@@ -427,57 +329,33 @@ def _create_schema_sqlite(db: DB):
         """
     )
 
+    # Optional helper tables (used by some older auth/utils code). Safe to keep.
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS otps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            otp_code TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        """
+    )
 
-        db.execute(
-
-            """
-
-            CREATE TABLE IF NOT EXISTS otps (
-
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                user_id INTEGER NOT NULL,
-
-                otp_code TEXT NOT NULL,
-
-                purpose TEXT NOT NULL,
-
-                expires_at TEXT NOT NULL,
-
-                created_at TEXT NOT NULL,
-
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-
-            );
-
-            """
-
-        )
-
-
-        db.execute(
-
-            """
-
-            CREATE TABLE IF NOT EXISTS audit_logs (
-
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                user_id INTEGER,
-
-                event TEXT NOT NULL,
-
-                ip_address TEXT NOT NULL,
-
-                created_at TEXT NOT NULL DEFAULT '',
-
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-
-            );
-
-            """
-
-        )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            event TEXT NOT NULL,
+            ip_address TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
 
     db.commit()
 
@@ -645,16 +523,44 @@ def _create_schema_postgres(db: DB):
         """
     )
 
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS otps (
+            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            otp_code TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            CONSTRAINT fk_otps_user
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        """
+    )
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            user_id BIGINT,
+            event TEXT NOT NULL,
+            ip_address TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT '',
+            CONSTRAINT fk_audit_logs_user
+              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
+
     db.commit()
 
 
 def init_db():
-    """
-    Idempotent schema init + defaults.
-    Safe to call at startup and/or during requests.
-    """
     db = get_db()
-    ensure_schema(db)
+    if db.kind == "postgres":
+        _create_schema_postgres(db)
+    else:
+        _create_schema_sqlite(db)
 
     ensure_default_admin()
     ensure_default_sections_for_all_events()
@@ -663,12 +569,12 @@ def init_db():
 # ----------------------------
 # Default admin
 # ----------------------------
+
 def ensure_default_admin():
     db = get_db()
-    ensure_schema(db)
 
-    default_email = os.getenv("DEFAULT_ADMIN_EMAIL", "dehindeaba@gmail.com")
-    default_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "Admin1234")
+    default_email = (os.getenv("DEFAULT_ADMIN_EMAIL") or "dehindeaba@gmail.com").strip()
+    default_password = (os.getenv("DEFAULT_ADMIN_PASSWORD") or "Admin1234").strip()
 
     cur = db.execute("SELECT id FROM users WHERE email=?", (default_email,))
     row = cur.fetchone()
@@ -712,6 +618,7 @@ def ensure_default_admin():
 # ----------------------------
 # Default sections
 # ----------------------------
+
 DEFAULT_SECTIONS = [
     ("home", "Home", 10, ""),
     ("story", "Our Story", 20, ""),
@@ -726,24 +633,28 @@ DEFAULT_SECTIONS = [
 
 
 def ensure_default_sections(event_id: int):
+    """Insert default sections for the event if missing."""
     db = get_db()
-    ensure_schema(db)
-
     cols = get_table_columns(db, "sections")
 
-    # Real schema
     if "title" in cols and "content" in cols and "section_key" in cols:
         for (key, title, sort_order, initial_content) in DEFAULT_SECTIONS:
+            visible = 1
+            content = initial_content
+            draft_content = initial_content
+            image = ""
+
             db.execute(
                 "INSERT OR IGNORE INTO sections "
                 "(event_id, section_key, title, visible, content, draft_content, image, sort_order) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (int(event_id), key, title, 1, initial_content, initial_content, "", int(sort_order)),
+                (int(event_id), key, title, visible, content, draft_content, image, int(sort_order)),
             )
+
         db.commit()
         return
 
-    # Old schema fallback
+    # Very old schema fallback
     for (key, title, _, initial_content) in DEFAULT_SECTIONS:
         if "created_at" in cols:
             db.execute(
@@ -757,31 +668,33 @@ def ensure_default_sections(event_id: int):
                 "VALUES (?, ?, ?, ?)",
                 (int(event_id), key, title, initial_content),
             )
+
     db.commit()
 
 
 def ensure_default_sections_for_all_events():
     db = get_db()
-    ensure_schema(db)
+    # If events table doesn't exist yet (first boot mid-deploy), just skip.
+    try:
+        cur = db.execute("SELECT id FROM events", ())
+        rows = cur.fetchall() or []
+    except Exception:
+        return
 
-    cur = db.execute("SELECT id FROM events", ())
-    rows = cur.fetchall() or []
     for r in rows:
         event_id = row_get(r, "id")
-        if event_id is not None:
-            ensure_default_sections(int(event_id))
+        if event_id is None:
+            continue
+        ensure_default_sections(int(event_id))
 
 
 # ----------------------------
-# Flask integration (optional)
+# Flask integration
 # ----------------------------
+
 def init_app(app):
-    """
-    If you prefer, call this from app.py instead of manually calling init_db().
-      from db_core import init_app
-      init_app(app)
-    """
-    app.config.setdefault("DATABASE", os.path.abspath(os.getenv("DATABASE_PATH", "app.db")))
+    # Optional: override SQLite file via config
+    app.config.setdefault("DATABASE", os.path.abspath((os.getenv("DATABASE_PATH") or "app.db").strip()))
     app.teardown_appcontext(close_db)
 
     with app.app_context():
