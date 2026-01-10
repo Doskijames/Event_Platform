@@ -25,35 +25,29 @@ except Exception:
 
 def _ensure_drive_env_aliases():
     """
-    Support BOTH env naming styles:
+    Prefer Base64 credentials on Render (safe, avoids newline issues).
 
-    Render-style:
-      - GDRIVE_SERVICE_ACCOUNT_JSON
-      - GDRIVE_FOLDER_ID
+    Supported inputs:
+      - GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (recommended)
+      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64 (optional alias)
+      - GDRIVE_SERVICE_ACCOUNT_JSON_BASE64 (optional alias)
 
-    Your style (as you mentioned):
-      - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON
-      - GOOGLE_DRIVE_FOLDER_ID
+    Folder ID:
+      - GOOGLE_DRIVE_FOLDER_ID (recommended)
+      - GDRIVE_FOLDER_ID (alias)
 
-    Library-style expected by gdrive_storage.py:
-      - GOOGLE_SERVICE_ACCOUNT_JSON (or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64)
-      - GOOGLE_DRIVE_FOLDER_ID
+    IMPORTANT:
+      - We intentionally do NOT alias raw JSON env vars into GOOGLE_SERVICE_ACCOUNT_JSON,
+        because raw JSON often breaks on Render due to newline characters in private_key.
     """
-    # --- service account JSON aliases ---
-    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "").strip():
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON", "").strip()
-
-    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() == "" and os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", "").strip():
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", "").strip()
-
-    # Optional: base64 alias if you ever use it
-    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
-
+    # ---- Base64 creds aliases (SAFE) ----
     if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
         os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
 
-    # --- folder id aliases ---
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip() == "" and os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip():
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_BASE64"] = os.getenv("GDRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
+
+    # ---- Folder ID alias ----
     if os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() == "" and os.getenv("GDRIVE_FOLDER_ID", "").strip():
         os.environ["GOOGLE_DRIVE_FOLDER_ID"] = os.getenv("GDRIVE_FOLDER_ID", "").strip()
 
@@ -88,13 +82,13 @@ def _save_to_storage(file_storage, filename: str) -> str:
     """
     _ensure_drive_env_aliases()
 
-    # ---- DIAGNOSTIC LOG (what you requested) ----
+    # ---- DIAGNOSTIC LOG ----
     current_app.logger.warning(
         "UPLOAD: drive_enabled=%s upload_func=%s has_folder=%s has_json=%s",
         (drive_enabled() if callable(drive_enabled) else None),
         bool(upload_file_to_drive),
         bool(os.getenv("GOOGLE_DRIVE_FOLDER_ID")),
-        bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")),
+        bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")),
     )
 
     drive_ok = (
@@ -114,7 +108,6 @@ def _save_to_storage(file_storage, filename: str) -> str:
             )
 
             # For <img src="..."> and <audio src="...">, a direct link is best.
-            # download_url is usually the most reliable for embedding.
             return meta.get("download_url") or meta.get("view_url") or meta.get("file_id")
         except Exception as e:
             # If Drive upload fails, log it and fall back to local (keeps app working)
@@ -138,8 +131,7 @@ def get_photos(event_id: int, kind: str):
         if isinstance(r, dict):
             rr = dict(r)
         else:
-            # sqlite3.Row -> dict
-            rr = {k: r[k] for k in r.keys()}
+            rr = {k: r[k] for k in r.keys()}  # sqlite3.Row -> dict
         rr["file_url"] = _public_media_url(rr.get("file_name", ""))
         out.append(rr)
 
