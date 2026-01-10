@@ -21,11 +21,20 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 # Google Drive uploader (OAuth)
+# We optionally import get_drive_service/drive_file_embed_url so we can resolve
+# old DB values that are just filenames.
 try:
-    from gdrive_storage import drive_enabled, upload_file_to_drive
+    from gdrive_storage import (
+        drive_enabled,
+        upload_file_to_drive,
+        get_drive_service,
+        drive_file_embed_url,
+    )
 except Exception:
     drive_enabled = None
     upload_file_to_drive = None
+    get_drive_service = None
+    drive_file_embed_url = None
 
 from db_core import get_db, ensure_default_sections
 from utils_core import (
@@ -181,6 +190,60 @@ def _local_upload_exists(filename: str) -> bool:
         return False
 
 
+# Simple in-memory cache to avoid calling Drive list() repeatedly on each page load.
+# key: filename, value: resolved url or "". (Cache is per process and resets on redeploy.)
+_DRIVE_NAME_URL_CACHE = {}
+
+
+def _drive_url_for_filename(filename: str) -> str:
+    """
+    If the DB contains just a filename (legacy), try to find a Drive file with
+    that exact name inside GOOGLE_DRIVE_FOLDER_ID and return a usable <img> URL.
+
+    This is helpful if uploads are going to Drive but the DB still has old values.
+    """
+    name = (filename or "").strip()
+    if not name or get_drive_service is None or drive_file_embed_url is None:
+        return ""
+
+    if name in _DRIVE_NAME_URL_CACHE:
+        return _DRIVE_NAME_URL_CACHE[name]
+
+    try:
+        # Only attempt lookup when Drive integration is configured.
+        if not (callable(drive_enabled) and drive_enabled()):
+            _DRIVE_NAME_URL_CACHE[name] = ""
+            return ""
+
+        folder_id = (os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+        if not folder_id:
+            _DRIVE_NAME_URL_CACHE[name] = ""
+            return ""
+
+        # Escape single quotes for Drive query.
+        safe_name = name.replace("'", "\\'")
+        q = f"name='{safe_name}' and '{folder_id}' in parents and trashed=false"
+
+        service = get_drive_service()
+        resp = service.files().list(
+            q=q,
+            fields="files(id,name,createdTime)",
+            orderBy="createdTime desc",
+            pageSize=1,
+        ).execute()
+        files = resp.get("files") or []
+        if files:
+            url = drive_file_embed_url(files[0]["id"])
+            _DRIVE_NAME_URL_CACHE[name] = url
+            return url
+
+    except Exception:
+        pass
+
+    _DRIVE_NAME_URL_CACHE[name] = ""
+    return ""
+
+
 def media_url(stored_value: str):
     """
     If stored_value is already a URL (Drive), return it.
@@ -194,8 +257,17 @@ def media_url(stored_value: str):
         return v
     if _looks_like_drive_file_id(v):
         return _drive_uc_view(v)
+
+    # Legacy local file
     if _local_upload_exists(v):
         return url_for("static", filename=f"uploads/{v}")
+
+    # Legacy value might be just a filename, but the actual file exists in Drive.
+    # We try to resolve it by name in your configured folder so old rows become visible again.
+    drive_url = _drive_url_for_filename(v)
+    if drive_url:
+        return drive_url
+
     # File missing (Render filesystem is ephemeral) -> don't show broken image
     return ""
 def _drive_ok() -> bool:
