@@ -1,4 +1,10 @@
 {% macro media_url(v) -%}
-{% set s = (v or "") %}
-{% if s.startswith("http://") or s.startswith("https://") %}{{ s }}{% elif s %}{{ url_for("static", filename="uploads/" ~ s) }}{% else %}{{ "" }}{% endif %}
+  {% set s = (v or "") %}
+  {% if s.startswith("http://") or s.startswith("https://") %}
+    {{ s }}
+  {% elif s %}
+    {{ url_for("static", filename="uploads/" ~ s) }}
+  {% else %}
+    {{ "" }}
+  {% endif %}
 {%- endmacro %}
