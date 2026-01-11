@@ -76,21 +76,26 @@
 
   <!-- FOOTER -->
   <footer class="footer">
-    <div class="footer-inner">
-      <div class="muted" style="font-weight:900;">
-        © {{ (now().year if now is defined else 2025) }} E-Accesslink.ng
-      </div>
-
-      <a class="footer-ig" target="_blank" rel="noopener"
-         href="https://www.instagram.com/eaccesslink.ng"
-         aria-label="Instagram">
-        <svg class="ig-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5zm10 2H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3z"/>
-        </svg>
-      </a>
+  <div class="footer-inner">
+    <div class="muted" style="font-weight:900;">
+      © {{ (now().year if now is defined else 2025) }} E-Accesslink.ng
     </div>
-  </footer>
 
+    <a class="footer-ig" target="_blank" rel="noopener"
+       href="https://www.instagram.com/eaccesslink.ng"
+       aria-label="Instagram">
+      <!-- Proper Instagram icon -->
+      <svg class="ig-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <!-- Outer rounded square -->
+        <path d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5zm10 2H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3z"/>
+        <!-- Camera circle -->
+        <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/>
+        <!-- Small lens dot (top right) -->
+        <circle cx="17.5" cy="6.5" r="1"/>
+      </svg>
+    </a>
+  </div>
+</footer>
   <script>
     (function(){
       const themeLink = document.getElementById("themeStylesheet");
