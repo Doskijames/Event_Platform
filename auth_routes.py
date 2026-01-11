@@ -13,23 +13,8 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from db_core import get_db
-
-
-# -------------------- Safe row getter --------------------
-def row_get(row, key, default=None):
-    if row is None:
-        return default
-    try:
-        if hasattr(row, "keys") and key in row.keys():
-            v = row[key]
-            return default if v is None else v
-        if isinstance(row, dict):
-            v = row.get(key, default)
-            return default if v is None else v
-    except Exception:
-        pass
-    return default
+# ✅ Unified adapter + helpers
+from db_core import get_db, row_get  # <-- import row_get instead of redefining it
 
 
 # -------------------- Config --------------------
@@ -116,7 +101,8 @@ def current_user():
     uid = session.get("user_id")
     if not uid:
         return None
-    return get_db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    db = get_db()
+    return db.execute("SELECT * FROM users WHERE id=?", (int(uid),)).fetchone()
 
 
 def is_logged_in():
@@ -178,14 +164,14 @@ def lock_user_account(user_id: int):
     db = get_db()
     db.execute(
         "UPDATE users SET is_locked=1, failed_login_attempts=? WHERE id=?",
-        (MAX_FAILED_LOGINS, user_id),
+        (MAX_FAILED_LOGINS, int(user_id)),
     )
     db.commit()
 
 
 def reset_failed_logins(user_id: int):
     db = get_db()
-    db.execute("UPDATE users SET failed_login_attempts=0 WHERE id=?", (user_id,))
+    db.execute("UPDATE users SET failed_login_attempts=0 WHERE id=?", (int(user_id),))
     db.commit()
 
 
@@ -227,12 +213,12 @@ def send_otp_email(to_email: str, otp: str, purpose: str) -> bool:
 def set_user_otp(user_id: int, purpose: str = "verify", ttl_minutes: int = OTP_TTL_MINUTES):
     otp = generate_otp()
     otp_hash = generate_password_hash(otp)
-    expires_at = (now_utc() + timedelta(minutes=ttl_minutes)).isoformat()
+    expires_at = (now_utc() + timedelta(minutes=int(ttl_minutes))).isoformat()
 
     db = get_db()
     db.execute(
         "UPDATE users SET otp_hash=?, otp_expires_at=?, otp_purpose=? WHERE id=?",
-        (otp_hash, expires_at, purpose, user_id),
+        (otp_hash, expires_at, purpose, int(user_id)),
     )
     db.commit()
     return otp
@@ -246,7 +232,7 @@ def verify_user_otp(user_id: int, otp: str, purpose: str | None = None) -> bool:
     db = get_db()
     u = db.execute(
         "SELECT otp_hash, otp_expires_at, otp_purpose FROM users WHERE id=?",
-        (user_id,),
+        (int(user_id),),
     ).fetchone()
     if not u:
         return False
@@ -275,7 +261,7 @@ def verify_user_otp(user_id: int, otp: str, purpose: str | None = None) -> bool:
 
     db.execute(
         "UPDATE users SET otp_hash='', otp_expires_at='', otp_purpose='verify' WHERE id=?",
-        (user_id,),
+        (int(user_id),),
     )
     db.commit()
     return True
@@ -284,10 +270,9 @@ def verify_user_otp(user_id: int, otp: str, purpose: str | None = None) -> bool:
 # -------------------- Forgot password OTP table --------------------
 def _ensure_forgot_pw_table(db):
     """
-    IMPORTANT:
-    - SQLite supports: AUTOINCREMENT
-    - Postgres does NOT support AUTOINCREMENT
-    This function creates the table with the right syntax depending on db.kind.
+    OPTIONAL SAFE-GUARD:
+    Your db_core already creates password_reset_otps in init_db().
+    Keeping this is okay as a safety net if the DB was created before that change.
     """
     if getattr(db, "kind", "") == "postgres":
         db.execute(
@@ -351,7 +336,6 @@ def _clear_forgot_pw_otps(user_id: int):
     _ensure_forgot_pw_table(db)
     db.execute("DELETE FROM password_reset_otps WHERE user_id=?", (int(user_id),))
     db.commit()
-
 
 # -------------------- Routes registration --------------------
 def register_auth_routes(app):
