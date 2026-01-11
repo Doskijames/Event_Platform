@@ -1,20 +1,17 @@
 # db_core.py
-"""Database core + schema management.
-
-Supports BOTH:
-- SQLite (local dev / small deployments)
-- Postgres (Render / production)
+"""
+Database core + schema management (POSTGRES ONLY).
 
 Key design:
-- Application code should call get_db() and use the returned adapter.
-- Do NOT open sqlite3 connections directly elsewhere (e.g. utils_core).
+- Application code calls get_db() and uses the returned adapter.
+- Keep SQLite-style placeholders (?) in the app code; DB adapter converts to %s.
+- Convert "INSERT OR IGNORE" -> "INSERT ... ON CONFLICT DO NOTHING"
 """
 
 import os
-import sqlite3
 from datetime import datetime, timezone
 
-from flask import current_app, g
+from flask import g
 from werkzeug.security import generate_password_hash
 
 import psycopg2
@@ -29,25 +26,8 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def using_postgres() -> bool:
-    # Render typically provides DATABASE_URL.
-    return bool((os.getenv("DATABASE_URL") or "").strip())
-
-
-def _sqlite_db_path() -> str:
-    """Prefer Flask config, fallback to env var, fallback to app.db."""
-    try:
-        p = current_app.config.get("DATABASE")
-        if p:
-            return p
-    except Exception:
-        pass
-
-    return os.path.abspath((os.getenv("DATABASE_PATH") or "app.db").strip())
-
-
 def row_get(row, key, default=None):
-    """Works with sqlite3.Row and dict rows (psycopg2 RealDictCursor)."""
+    """Works with dict rows (psycopg2 RealDictCursor) and fallback indexable rows."""
     if row is None:
         return default
     if isinstance(row, dict):
@@ -60,31 +40,39 @@ def row_get(row, key, default=None):
         return default
 
 
+def _require_database_url() -> str:
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    if not db_url:
+        raise RuntimeError(
+            "DATABASE_URL is required for Postgres-only mode. "
+            "Set DATABASE_URL to your Postgres connection string."
+        )
+    return db_url
+
+
 # ----------------------------
 # DB Adapter
 # ----------------------------
 
 class DB:
-    """Adapter so the rest of your code can keep doing:
+    """
+    Adapter so the rest of your code can keep doing:
 
       db = get_db()
       cur = db.execute(...)
       rows = cur.fetchall()
       db.commit()
 
-    Also auto-converts:
-      - SQLite placeholders '?' -> Postgres '%s'
-      - SQLite 'INSERT OR IGNORE' -> Postgres 'ON CONFLICT DO NOTHING'
+    Auto-converts:
+      - '?' placeholders -> '%s'
+      - 'INSERT OR IGNORE INTO' -> 'INSERT INTO ... ON CONFLICT DO NOTHING'
     """
 
-    def __init__(self, kind: str, conn):
-        self.kind = kind
+    def __init__(self, conn):
+        self.kind = "postgres"
         self.conn = conn
 
     def _fix_sql(self, sql: str) -> str:
-        if self.kind != "postgres":
-            return sql
-
         # 1) placeholders
         sql = sql.replace("?", "%s")
 
@@ -113,25 +101,16 @@ class DB:
             pass
 
 
-def _connect_sqlite() -> DB:
-    path = _sqlite_db_path()
-    # check_same_thread False helps in some hosting environments
-    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    return DB("sqlite", conn)
-
-
 def _connect_postgres() -> DB:
-    db_url = os.environ["DATABASE_URL"].strip()
+    db_url = _require_database_url()
+    # RealDictCursor returns dict rows, which your row_get supports
     conn = psycopg2.connect(db_url, cursor_factory=psycopg2.extras.RealDictCursor)
-    return DB("postgres", conn)
+    return DB(conn)
 
 
 def get_db() -> DB:
     if not hasattr(g, "db") or g.db is None:
-        g.db = _connect_postgres() if using_postgres() else _connect_sqlite()
+        g.db = _connect_postgres()
     return g.db
 
 
@@ -147,218 +126,24 @@ def close_db(e=None):
 # ----------------------------
 
 def get_table_columns(db: DB, table_name: str) -> set[str]:
-    """Return a set of column names for a table (SQLite or Postgres)."""
     cols: set[str] = set()
-
-    if db.kind == "postgres":
-        cur = db.execute(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema='public' AND table_name=%s
-            """,
-            (table_name,),
-        )
-        rows = cur.fetchall() or []
-        for r in rows:
-            cols.add(r["column_name"] if isinstance(r, dict) else r[0])
-        return cols
-
-    cur = db.execute(f"PRAGMA table_info({table_name})")
+    cur = db.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema='public' AND table_name=%s
+        """,
+        (table_name,),
+    )
     rows = cur.fetchall() or []
     for r in rows:
-        cols.add(r["name"] if isinstance(r, dict) else r[1])
+        cols.add(r["column_name"] if isinstance(r, dict) else r[0])
     return cols
 
 
 # ----------------------------
-# Schema creation
+# Schema creation (Postgres)
 # ----------------------------
-
-def _create_schema_sqlite(db: DB):
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-
-            role TEXT DEFAULT 'user',
-            is_verified INTEGER DEFAULT 0,
-
-            failed_login_attempts INTEGER DEFAULT 0,
-            is_locked INTEGER DEFAULT 0,
-
-            otp_hash TEXT DEFAULT '',
-            otp_expires_at TEXT DEFAULT '',
-            otp_purpose TEXT DEFAULT 'verify',
-
-            created_at TEXT DEFAULT ''
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            slug TEXT UNIQUE NOT NULL,
-
-            name TEXT NOT NULL,
-            date_iso TEXT NOT NULL,
-            location TEXT NOT NULL,
-            description TEXT NOT NULL,
-
-            passcode TEXT NOT NULL,
-            owner_user_id INTEGER,
-
-            cover_image TEXT DEFAULT '',
-            created_at TEXT DEFAULT '',
-
-            FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE SET NULL
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL,
-            section_key TEXT NOT NULL,
-
-            title TEXT DEFAULT '',
-            visible INTEGER DEFAULT 1,
-
-            content TEXT DEFAULT '',
-            draft_content TEXT DEFAULT '',
-
-            image TEXT DEFAULT '',
-            sort_order INTEGER DEFAULT 0,
-
-            UNIQUE(event_id, section_key),
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS rsvp_questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL,
-            position INTEGER NOT NULL DEFAULT 1,
-            question TEXT NOT NULL,
-            kind TEXT NOT NULL DEFAULT 'main',
-            type TEXT NOT NULL DEFAULT 'text',
-            allow_multi INTEGER NOT NULL DEFAULT 0,
-            options TEXT NOT NULL DEFAULT '[]',
-            required INTEGER NOT NULL DEFAULT 1,
-            show_if_question INTEGER,
-            show_if_value TEXT NOT NULL DEFAULT '',
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS rsvp_responses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL,
-            user_id INTEGER,
-
-            first_name TEXT NOT NULL DEFAULT '',
-            last_name TEXT NOT NULL DEFAULT '',
-            email TEXT NOT NULL DEFAULT '',
-            whatsapp TEXT NOT NULL DEFAULT '',
-
-            whatsapp_opt_in INTEGER NOT NULL DEFAULT 0,
-            whatsapp_opt_in_at TEXT NOT NULL DEFAULT '',
-            whatsapp_opt_in_source TEXT NOT NULL DEFAULT '',
-            whatsapp_consent_version TEXT NOT NULL DEFAULT 'v1',
-
-            answers TEXT NOT NULL DEFAULT '{}',
-            created_at TEXT NOT NULL DEFAULT '',
-
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS event_photos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            file_name TEXT NOT NULL,
-            uploader_user_id INTEGER,
-            uploader_name TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT '',
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
-            FOREIGN KEY(uploader_user_id) REFERENCES users(id) ON DELETE SET NULL
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS photos_day_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL UNIQUE,
-            token TEXT NOT NULL DEFAULT '',
-            is_open INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL DEFAULT '',
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS password_reset_otps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            otp_hash TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-        """
-    )
-
-    # Optional helper tables (used by some older auth/utils code). Safe to keep.
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS otps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            otp_code TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            event TEXT NOT NULL,
-            ip_address TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT '',
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-        );
-        """
-    )
-
-    db.commit()
-
 
 def _create_schema_postgres(db: DB):
     db.execute(
@@ -525,21 +310,6 @@ def _create_schema_postgres(db: DB):
 
     db.execute(
         """
-        CREATE TABLE IF NOT EXISTS otps (
-            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            user_id BIGINT NOT NULL,
-            otp_code TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            CONSTRAINT fk_otps_user
-              FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-        """
-    )
-
-    db.execute(
-        """
         CREATE TABLE IF NOT EXISTS audit_logs (
             id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             user_id BIGINT,
@@ -557,11 +327,7 @@ def _create_schema_postgres(db: DB):
 
 def init_db():
     db = get_db()
-    if db.kind == "postgres":
-        _create_schema_postgres(db)
-    else:
-        _create_schema_sqlite(db)
-
+    _create_schema_postgres(db)
     ensure_default_admin()
     ensure_default_sections_for_all_events()
 
@@ -576,42 +342,33 @@ def ensure_default_admin():
     default_email = (os.getenv("DEFAULT_ADMIN_EMAIL") or "dehindeaba@gmail.com").strip()
     default_password = (os.getenv("DEFAULT_ADMIN_PASSWORD") or "Admin1234").strip()
 
-    cur = db.execute("SELECT id FROM users WHERE email=?", (default_email,))
-    row = cur.fetchone()
+    row = db.execute("SELECT id FROM users WHERE email=?", (default_email,)).fetchone()
     if row:
         return
 
     pwd_hash = generate_password_hash(default_password)
-    cols = get_table_columns(db, "users")
 
-    if "is_verified" in cols and "failed_login_attempts" in cols:
-        db.execute(
-            """
-            INSERT INTO users
-              (email, password_hash, role, is_verified, failed_login_attempts, is_locked,
-               otp_hash, otp_expires_at, otp_purpose, created_at)
-            VALUES
-              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                default_email,
-                pwd_hash,
-                "admin",
-                1,
-                0,
-                0,
-                "",
-                "",
-                "verify",
-                now_iso(),
-            ),
-        )
-    else:
-        db.execute(
-            "INSERT INTO users (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-            (default_email, pwd_hash, "admin", now_iso()),
-        )
-
+    db.execute(
+        """
+        INSERT INTO users
+          (email, password_hash, role, is_verified, failed_login_attempts, is_locked,
+           otp_hash, otp_expires_at, otp_purpose, created_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            default_email,
+            pwd_hash,
+            "admin",
+            1,
+            0,
+            0,
+            "",
+            "",
+            "verify",
+            now_iso(),
+        ),
+    )
     db.commit()
 
 
@@ -633,59 +390,28 @@ DEFAULT_SECTIONS = [
 
 
 def ensure_default_sections(event_id: int):
-    """Insert default sections for the event if missing."""
     db = get_db()
-    cols = get_table_columns(db, "sections")
-
-    if "title" in cols and "content" in cols and "section_key" in cols:
-        for (key, title, sort_order, initial_content) in DEFAULT_SECTIONS:
-            visible = 1
-            content = initial_content
-            draft_content = initial_content
-            image = ""
-
-            db.execute(
-                "INSERT OR IGNORE INTO sections "
-                "(event_id, section_key, title, visible, content, draft_content, image, sort_order) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (int(event_id), key, title, visible, content, draft_content, image, int(sort_order)),
-            )
-
-        db.commit()
-        return
-
-    # Very old schema fallback
-    for (key, title, _, initial_content) in DEFAULT_SECTIONS:
-        if "created_at" in cols:
-            db.execute(
-                "INSERT OR IGNORE INTO sections (event_id, section_key, section_title, section_content, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (int(event_id), key, title, initial_content, now_iso()),
-            )
-        else:
-            db.execute(
-                "INSERT OR IGNORE INTO sections (event_id, section_key, section_title, section_content) "
-                "VALUES (?, ?, ?, ?)",
-                (int(event_id), key, title, initial_content),
-            )
-
+    for (key, title, sort_order, initial_content) in DEFAULT_SECTIONS:
+        db.execute(
+            "INSERT OR IGNORE INTO sections "
+            "(event_id, section_key, title, visible, content, draft_content, image, sort_order) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (int(event_id), key, title, 1, initial_content, initial_content, "", int(sort_order)),
+        )
     db.commit()
 
 
 def ensure_default_sections_for_all_events():
     db = get_db()
-    # If events table doesn't exist yet (first boot mid-deploy), just skip.
     try:
-        cur = db.execute("SELECT id FROM events", ())
-        rows = cur.fetchall() or []
+        rows = db.execute("SELECT id FROM events", ()).fetchall() or []
     except Exception:
         return
 
     for r in rows:
         event_id = row_get(r, "id")
-        if event_id is None:
-            continue
-        ensure_default_sections(int(event_id))
+        if event_id is not None:
+            ensure_default_sections(int(event_id))
 
 
 # ----------------------------
@@ -693,9 +419,6 @@ def ensure_default_sections_for_all_events():
 # ----------------------------
 
 def init_app(app):
-    # Optional: override SQLite file via config
-    app.config.setdefault("DATABASE", os.path.abspath((os.getenv("DATABASE_PATH") or "app.db").strip()))
     app.teardown_appcontext(close_db)
-
     with app.app_context():
         init_db()
