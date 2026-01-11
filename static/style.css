@@ -252,15 +252,18 @@ a{ color:inherit; text-decoration:none; }
 }
 
 .event-cover{
-  height:160px;
-  background:var(--surface2);
-  border-bottom:1px solid var(--border);
+  width: 100%;
+  height: 350px;
+  overflow: hidden;   /* 👈 PREVENTS image overflow */
+  background: #000;   /* optional */
+  
 }
 .event-cover img{
-  width: 100%;
+   width: 100%;
   height: 100%;
-  object-fit: cover;      /* fills, no letterboxing */
-  object-position: 50% 30%; /* adjust to taste */
+  object-fit: contain;
+  transform: scale(1.2);     /* zoom */
+  transform-origin: center;
   display: block;
 }
 .event-cover-placeholder{
