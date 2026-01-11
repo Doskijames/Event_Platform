@@ -1,82 +1,96 @@
 {% extends "base.html" %}
 {% from "_media.html" import media_url %}
-
 {% block content %}
-<div class="page-wrap">
 
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-    <div>
-      <h1 style="margin:0;">Events</h1>
-      <p class="muted" style="margin:6px 0 0;">Browse events and open your website pages.</p>
-    </div>
+<div class="container">
+  <div class="page-head">
+    <h1>Events</h1>
+    <p class="muted">Browse available events. Log in and enter the passcode to access an event.</p>
 
-    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      {% if user %}
-        <div class="muted" style="font-weight:800;">{{ user.email }}</div>
-      {% endif %}
-      {% if has_endpoint('create_event') %}
-        <a class="btn" href="{{ url_for('create_event') }}">Create Event</a>
-      {% endif %}
-    </div>
+    {% if user %}
+      <div class="actions-row">
+        <a class="btn" href="{{ url_for('create_event') }}">+ Create Event</a>
+      </div>
+    {% endif %}
   </div>
 
-  {% if not events or events|length == 0 %}
-    <div class="section-card" style="margin-top:16px;">
-      <div class="muted" style="font-weight:900;">No events yet.</div>
-      {% if has_endpoint('create_event') %}
-        <p style="margin:10px 0 0;"><a href="{{ url_for('create_event') }}">Create your first event</a></p>
-      {% endif %}
-    </div>
-  {% else %}
-    <div style="margin-top:16px; display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
-      {% for event in events %}
-        {% set can_delete = (user and ((user.role|lower == 'admin') or ((event.owner_user_id|default(0)|int) == (user.id|default(0)|int)))) %}
-        <div class="section-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">
-          <div style="background:#0b0b0b;">
-            {% if event.cover_image %}
-              <img src="{{ media_url(event.cover_image) }}" alt="Event hero image"
-                   style="width:100%; height:180px; object-fit:contain; object-position:center; background:#0b0b0b; display:block;">
+  <div class="events-grid">
+
+    {% if user %}
+      <a class="event-card create-card" href="{{ url_for('create_event') }}">
+        <div class="event-cover create-cover">
+          <div class="create-plus">+</div>
+        </div>
+        <div class="event-card-body">
+          <div class="event-card-header">
+            <h3 class="event-title">Create a New Event</h3>
+            <span class="event-pill">NEW</span>
+          </div>
+          <div class="event-meta">
+            <span class="muted">Start your own event container</span>
+          </div>
+          <div class="event-cta">Click to create →</div>
+        </div>
+      </a>
+    {% endif %}
+
+    {% for e in events %}
+      {# Can delete if admin OR owner #}
+      {% set is_admin = (user and (user.role|default('')|lower == 'admin')) %}
+      {% set is_owner = (user and (e.owner_user_id|default(None) == user.id|default(None))) %}
+      {% set can_delete = (is_admin or is_owner) %}
+
+      <div style="position:relative;">
+        {% if can_delete %}
+          <form
+            method="POST"
+            action="{{ url_for('delete_event', slug=e.slug) }}"
+            style="position:absolute; top:12px; right:12px; z-index:5; margin:0;"
+            onsubmit="return confirm('Delete this event permanently? This cannot be undone.');"
+          >
+            <button
+              type="submit"
+              class="btn btn-outline"
+              style="padding:8px 10px; font-size:0.9rem; line-height:1; border-radius:12px;"
+              title="Delete event"
+            >
+              Delete
+            </button>
+          </form>
+        {% endif %}
+
+        <a class="event-card" href="{{ url_for('event_gate', slug=e.slug) }}">
+          <div class="event-cover">
+            {% if e.cover_image %}
+              <img src="{{ media_url(e['cover_image']) }}" alt="Event hero image">
             {% else %}
-              <div style="height:180px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:900;">
-                No cover image
-              </div>
+              <div class="event-cover-placeholder">No Cover Photo</div>
             {% endif %}
           </div>
 
-          <div style="padding:14px; display:flex; flex-direction:column; gap:10px; flex:1;">
-            <div>
-              <div style="font-weight:1000; font-size:1.05rem; color:var(--accent); line-height:1.2;">
-                {{ event.name }}
-              </div>
-              <div class="muted" style="margin-top:6px;">
-                {{ event.date_iso }} · {{ event.location }}
-              </div>
+          <div class="event-card-body">
+            <div class="event-card-header">
+              <h3 class="event-title">{{ e.name }}</h3>
+              <span class="event-pill">LOCKED</span>
             </div>
 
-            <div style="margin-top:auto; display:flex; gap:10px; flex-wrap:wrap;">
-              {% if has_endpoint('event_gate') %}
-                <a class="btn btn-outline" href="{{ url_for('event_gate', slug=event.slug) }}">Open</a>
-              {% elif has_endpoint('event_section') %}
-                <a class="btn btn-outline" href="{{ url_for('event_section', slug=event.slug, section_key='home') }}">Open</a>
-              {% else %}
-                <span class="muted">No event route found</span>
-              {% endif %}
-
-              {% if can_delete and has_endpoint('delete_event') %}
-                <form method="POST" action="{{ url_for('delete_event', slug=event.slug) }}"
-                      onsubmit="return confirm('Delete this event permanently? This cannot be undone.');"
-                      style="margin:0;">
-                  <button class="btn btn-outline" type="submit" style="border-color:#b00020; color:#b00020;">
-                    Delete
-                  </button>
-                </form>
-              {% endif %}
+            <div class="event-meta">
+              <span>{{ e.date_iso }}</span>
+              <span class="dot">•</span>
+              <span>{{ e.location }}</span>
             </div>
+
+            <div class="event-description muted">
+              {{ e.description }}
+            </div>
+
+            <div class="event-cta">Open event →</div>
           </div>
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
+        </a>
+      </div>
+    {% endfor %}
 
+  </div>
 </div>
+
 {% endblock %}
