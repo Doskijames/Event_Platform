@@ -1,25 +1,25 @@
 # utils_core.py
 """
-Shared utilities (slugging, sanitization, OTP helpers, etc.)
+Shared utilities (slugging, sanitization, OTP helpers, access checks, audit logging, etc.)
 
-IMPORTANT CHANGE:
-- This module now uses the unified DB adapter from db_core.py so it works with BOTH:
-  - SQLite (local dev)
-  - Postgres (Render/Neon/Supabase/etc)
+UPDATED:
+- Uses the unified DB adapter from db_core.py (works on Postgres; placeholders stay `?`)
+- OTP helpers use users.otp_hash/users.otp_expires_at/users.otp_purpose (NOT legacy otps table)
+- Sanitizer is safer + supports <img> (matches your editors / events_routes needs)
+- Uses timezone-aware UTC everywhere
 """
 
 import os
 import re
+import json
 import secrets
 import string
-import json
 from datetime import datetime, timedelta, timezone
-from html import escape
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# ✅ Unified DB adapter + helpers
+# IMPORTANT: Use SAME DB layer everywhere
 from db_core import get_db, row_get, now_iso
 
 
@@ -33,7 +33,7 @@ def parse_qa_list_json(raw: str) -> List[Dict[str, str]]:
       [{"q":"..","a":".."}]
       [{"question":"..","answer":".."}]
 
-    Always returns a list of dicts shaped like:
+    Always returns:
       [{"q": "...", "a": "..."}]
     """
     if not raw:
@@ -44,7 +44,7 @@ def parse_qa_list_json(raw: str) -> List[Dict[str, str]]:
         if not isinstance(data, list):
             return []
 
-        cleaned = []
+        cleaned: List[Dict[str, str]] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
@@ -56,7 +56,6 @@ def parse_qa_list_json(raw: str) -> List[Dict[str, str]]:
                 cleaned.append({"q": q, "a": a})
 
         return cleaned
-
     except Exception:
         return []
 
@@ -73,12 +72,9 @@ def slugify(text: str) -> str:
 
 def unique_slug(base_text: str, table: str = "events", column: str = "slug") -> str:
     """
-    Generates a unique slug for `table.column`.
+    Generate a unique slug in the current DB (Postgres).
 
-    Uses db_core.get_db() so it works on Postgres too.
-
-    NOTE:
-    - Keep SQLite-style placeholders (?) because db_core.DB converts them to %s on Postgres.
+    NOTE: Keep `?` placeholders; db_core converts them to `%s` for Postgres.
     """
     base = slugify(base_text)
     slug = base
@@ -91,64 +87,82 @@ def unique_slug(base_text: str, table: str = "events", column: str = "slug") -> 
             (slug,),
         ).fetchone()
         if not row:
-            break
+            return slug
         i += 1
         slug = f"{base}-{i}"
-
-    return slug
 
 
 # ================= HTML SANITIZATION =================
 
 def sanitize_quill_html(html: str) -> str:
     """
-    Basic sanitizer for Quill HTML output.
+    Safer sanitizer for Quill/editor HTML.
 
-    Removes script/style/iframe blocks and allows a conservative list of tags.
+    Behavior:
+    - strips script/style/iframe blocks
+    - strips inline event handlers (onclick, onload, etc.)
+    - blocks javascript: URLs in href/src
+    - allowlist tags: p, br, strong, em, u, s, ul, ol, li, h1-h4, blockquote, code, pre, a, img, span, div
     """
+    html = (html or "").strip()
     if not html:
         return ""
 
-    # strip dangerous blocks
+    # Remove dangerous blocks entirely
     html = re.sub(
-        r"<\s*(script|style|iframe).*?>.*?<\s*/\s*\1\s*>",
+        r"<\s*(script|style|iframe)\b[^>]*>.*?<\s*/\s*\1\s*>",
         "",
         html,
         flags=re.IGNORECASE | re.DOTALL,
     )
 
-    escaped = escape(html)
+    # Remove inline event handlers like onclick="..." / onclick='...' / onclick=unquoted
+    html = re.sub(r'\son\w+\s*=\s*"[^"]*"', "", html, flags=re.IGNORECASE)
+    html = re.sub(r"\son\w+\s*=\s*'[^']*'", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"\son\w+\s*=\s*[^\s>]+", "", html, flags=re.IGNORECASE)
 
-    allowed_tags = {
-        "p", "br", "strong", "em", "u", "s",
-        "ul", "ol", "li",
-        "h1", "h2", "h3", "h4",
-        "blockquote", "code", "pre",
-        "a",
-        "span",
-    }
+    # Block javascript: in href/src (double-quoted, single-quoted, and best-effort unquoted)
+    html = re.sub(r'href\s*=\s*"(javascript:[^"]*)"', 'href="#"', html, flags=re.IGNORECASE)
+    html = re.sub(r"href\s*=\s*'(javascript:[^']*)'", "href='#'", html, flags=re.IGNORECASE)
+    html = re.sub(r'href\s*=\s*(javascript:[^\s>]+)', 'href="#"', html, flags=re.IGNORECASE)
 
-    for tag in allowed_tags:
-        escaped = re.sub(fr"&lt;{tag}&gt;", f"<{tag}>", escaped, flags=re.I)
-        escaped = re.sub(fr"&lt;/{tag}&gt;", f"</{tag}>", escaped, flags=re.I)
+    html = re.sub(r'src\s*=\s*"(javascript:[^"]*)"', 'src=""', html, flags=re.IGNORECASE)
+    html = re.sub(r"src\s*=\s*'(javascript:[^']*)'", "src=''", html, flags=re.IGNORECASE)
+    html = re.sub(r"src\s*=\s*(javascript:[^\s>]+)", 'src=""', html, flags=re.IGNORECASE)
 
-    # allow a[href="..."] but force safe attrs
-    escaped = re.sub(
-        r'<a[^>]*href="([^"]+)"[^>]*>',
-        lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">',
-        escaped,
-        flags=re.I,
+    # Allow only selected tags (keeps attributes on allowed tags)
+    allowed = "p|br|strong|em|u|s|ul|ol|li|h1|h2|h3|h4|blockquote|code|pre|a|img|span|div"
+
+    # Remove any tag not in allowlist (keeps inner text)
+    html = re.sub(
+        rf"</?(?!({allowed})\b)[a-zA-Z0-9]+[^>]*>",
+        "",
+        html,
+        flags=re.IGNORECASE,
     )
 
-    return escaped
+    # Force safe link attrs on <a ...>
+    def _fix_a(m: re.Match) -> str:
+        tag = m.group(0)
+
+        if re.search(r"\btarget\s*=", tag, flags=re.IGNORECASE) is None:
+            tag = tag[:-1] + ' target="_blank">'  # add before >
+        if re.search(r"\brel\s*=", tag, flags=re.IGNORECASE) is None:
+            tag = tag[:-1] + ' rel="noopener noreferrer">'  # add before >
+        return tag
+
+    html = re.sub(r"<a\b[^>]*>", _fix_a, html, flags=re.IGNORECASE)
+
+    return html
 
 
 # ================= PASSWORD POLICY =================
 
-MIN_PASSWORD_LENGTH = int(os.getenv("MIN_PASSWORD_LENGTH", 8))
+MIN_PASSWORD_LENGTH = int(os.getenv("MIN_PASSWORD_LENGTH", "8"))
 
 
 def validate_password_policy(password: str) -> Tuple[bool, Optional[str]]:
+    password = password or ""
     if len(password) < MIN_PASSWORD_LENGTH:
         return False, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long."
     if " " in password:
@@ -157,12 +171,12 @@ def validate_password_policy(password: str) -> Tuple[bool, Optional[str]]:
         return False, "Password must include at least one letter."
     if not re.search(r"\d", password):
         return False, "Password must include at least one number."
-    if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=/\\[\]]", password):
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=/\\\[\]]", password):
         return False, "Password must include at least one special character."
     return True, None
 
 
-# ================= OTP HELPERS =================
+# ================= OTP HELPERS (UPDATED: users table) =================
 
 def generate_otp() -> str:
     return "".join(secrets.choice(string.digits) for _ in range(6))
@@ -180,14 +194,12 @@ def _parse_iso_dt(s: str) -> Optional[datetime]:
         return None
 
 
-def set_user_otp(user_id: int, purpose: str, expires: int = 15) -> str:
+def set_user_otp(user_id: int, purpose: str = "verify", expires: int = 15) -> str:
     """
-    Stores OTP on the users table using the schema in db_core:
+    Stores OTP on users table:
       users.otp_hash
       users.otp_expires_at
       users.otp_purpose
-
-    This avoids requiring a separate 'otps' table.
     """
     otp = generate_otp()
     otp_hash = generate_password_hash(otp)
@@ -206,10 +218,11 @@ def set_user_otp(user_id: int, purpose: str, expires: int = 15) -> str:
     return otp
 
 
-def verify_user_otp(user_id: int, otp: str, purpose: str) -> bool:
+def verify_user_otp(user_id: int, otp: str, purpose: str = "verify") -> bool:
     """
     Verifies OTP against users table fields.
     """
+    otp = (otp or "").strip()
     if not otp:
         return False
 
@@ -231,18 +244,21 @@ def verify_user_otp(user_id: int, otp: str, purpose: str) -> bool:
         return False
 
     otp_hash = row_get(row, "otp_hash") or ""
-    try:
-        return check_password_hash(otp_hash, otp)
-    except Exception:
+    if not otp_hash:
         return False
+
+    try:
+        ok = check_password_hash(otp_hash, otp)
+    except Exception:
+        ok = False
+
+    return bool(ok)
 
 
 def can_resend_otp(user_id: int, purpose: str, cooldown: int = 60) -> bool:
     """
-    Best-effort cooldown check without requiring an extra table.
-
-    We approximate "last sent" as: expires_at - 15 minutes (default window),
-    if we can parse expires_at. If not, we allow resend.
+    Cooldown check using users.otp_expires_at.
+    Approximation: last_sent = expires_at - 15 minutes.
     """
     try:
         db = get_db()
@@ -250,6 +266,7 @@ def can_resend_otp(user_id: int, purpose: str, cooldown: int = 60) -> bool:
             "SELECT otp_expires_at, otp_purpose FROM users WHERE id=?",
             (int(user_id),),
         ).fetchone()
+
         if not row:
             return True
 
@@ -261,8 +278,6 @@ def can_resend_otp(user_id: int, purpose: str, cooldown: int = 60) -> bool:
         if not expires_at:
             return True
 
-        # assume default expiry window is 15 minutes; if you change expires defaults,
-        # this is just an approximation.
         last_sent = expires_at - timedelta(minutes=15)
         return (datetime.now(timezone.utc) - last_sent).total_seconds() >= int(cooldown)
     except Exception:
@@ -275,16 +290,13 @@ def has_event_access(event_row: Any, user_row: Any = None) -> bool:
     """
     Determine if a user has access to an event.
 
-    Supports multiple legacy schemas:
+    Supports:
     - is_public (optional)
-    - owner_user_id (db_core) or user_id (legacy)
-
-    If is_public is missing, we assume events are passcode-gated elsewhere.
+    - owner_user_id (new) OR user_id (legacy)
     """
     if not event_row:
         return False
 
-    # Public event (if column exists)
     is_public = row_get(event_row, "is_public", None)
     if is_public is not None:
         try:
@@ -293,7 +305,6 @@ def has_event_access(event_row: Any, user_row: Any = None) -> bool:
         except Exception:
             pass
 
-    # No user -> no access to private event
     if not user_row:
         return False
 
@@ -302,36 +313,24 @@ def has_event_access(event_row: Any, user_row: Any = None) -> bool:
     if owner_id is None:
         owner_id = row_get(event_row, "user_id", None)
 
-    # Owner access
     try:
         if user_id and owner_id and int(user_id) == int(owner_id):
             return True
     except Exception:
         pass
 
-    # Admin access
     if (row_get(user_row, "role") or "").lower() == "admin":
         return True
 
     return False
 
 
-#============================================================================================
 def event_session_key(event_id: int) -> str:
-    """
-    Generate a consistent session key for an event.
-    """
     return f"event_{int(event_id)}"
 
 
-#=====================================================================================
-
 def ensure_photos_day_token(session_obj: Any, prefix: str = "photos_day") -> str:
-    """
-    Ensure there is a stable per-day token stored in session.
-    Returns the token string.
-    """
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"{prefix}_{today}"
 
     token = session_obj.get(key)
@@ -343,13 +342,9 @@ def ensure_photos_day_token(session_obj: Any, prefix: str = "photos_day") -> str
     return token
 
 
-# ================= AUDIT LOGGING (best-effort) =================
-
-def log_security_event(user_id: int, event: str, ip: str) -> None:
+def log_security_event(user_id: Optional[int], event: str, ip: str) -> None:
     """
-    Best-effort audit logging.
-
-    If you don't have an audit_logs table, this becomes a no-op (won't crash your app).
+    Best-effort audit logging. Won't crash if table/columns differ.
     """
     db = get_db()
     try:
@@ -362,5 +357,5 @@ def log_security_event(user_id: int, event: str, ip: str) -> None:
         )
         db.commit()
     except Exception:
-        # table may not exist; don't break auth flows
+        # If audit_logs doesn't exist or schema differs, don't break flows
         pass
