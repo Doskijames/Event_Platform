@@ -1,28 +1,39 @@
+# utils_core.py
+"""
+Shared utilities (slugging, sanitization, OTP helpers, access checks, audit logging, etc.)
+
+UPDATED:
+- Uses the unified DB adapter from db_core.py (works on Postgres; placeholders stay `?`)
+- OTP helpers use users.otp_hash/users.otp_expires_at/users.otp_purpose (NOT legacy otps table)
+- Sanitizer is safer + supports <img> (matches your editors / events_routes needs)
+- Uses timezone-aware UTC everywhere
+"""
+
 import os
 import re
+import json
 import secrets
 import string
-import json
-from datetime import datetime, timedelta
-from html import escape
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-# IMPORTANT:
-# Use the SAME DB layer everywhere (SQLite or Postgres), based on DATABASE_URL.
-# Do NOT open a separate sqlite3 connection here, or you'll hit: "no such table: events"
-# when the app is actually running on Postgres.
-from db_core import get_db, row_get
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# IMPORTANT: Use SAME DB layer everywhere
+from db_core import get_db, row_get, now_iso
 
 
 # ================= JSON HELPERS =================
 
-def parse_qa_list_json(raw: str):
-    """Safely parse a JSON-encoded Q&A / Tidbits list.
+def parse_qa_list_json(raw: str) -> List[Dict[str, str]]:
+    """
+    Safely parse a JSON-encoded Q&A / Tidbits list.
 
     Supports BOTH formats:
       [{"q":"..","a":".."}]
       [{"question":"..","answer":".."}]
 
-    Always returns a list of dicts shaped like:
+    Always returns:
       [{"q": "...", "a": "..."}]
     """
     if not raw:
@@ -33,7 +44,7 @@ def parse_qa_list_json(raw: str):
         if not isinstance(data, list):
             return []
 
-        cleaned = []
+        cleaned: List[Dict[str, str]] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
@@ -45,7 +56,6 @@ def parse_qa_list_json(raw: str):
                 cleaned.append({"q": q, "a": a})
 
         return cleaned
-
     except Exception:
         return []
 
@@ -61,10 +71,10 @@ def slugify(text: str) -> str:
 
 
 def unique_slug(base_text: str, table: str = "events", column: str = "slug") -> str:
-    """Generate a unique slug in the current DB (SQLite or Postgres).
+    """
+    Generate a unique slug in the current DB (Postgres).
 
-    NOTE: Do NOT close the db here. db_core stores the connection on flask.g and
-    it will be closed automatically at teardown.
+    NOTE: Keep `?` placeholders; db_core converts them to `%s` for Postgres.
     """
     base = slugify(base_text)
     slug = base
@@ -85,46 +95,74 @@ def unique_slug(base_text: str, table: str = "events", column: str = "slug") -> 
 # ================= HTML SANITIZATION =================
 
 def sanitize_quill_html(html: str) -> str:
+    """
+    Safer sanitizer for Quill/editor HTML.
+
+    Behavior:
+    - strips script/style/iframe blocks
+    - strips inline event handlers (onclick, onload, etc.)
+    - blocks javascript: URLs in href/src
+    - allowlist tags: p, br, strong, em, u, s, ul, ol, li, h1-h4, blockquote, code, pre, a, img, span, div
+    """
+    html = (html or "").strip()
     if not html:
         return ""
 
+    # Remove dangerous blocks entirely
     html = re.sub(
-        r"<\s*(script|style|iframe).*?>.*?<\s*/\s*\1\s*>",
+        r"<\s*(script|style|iframe)\b[^>]*>.*?<\s*/\s*\1\s*>",
         "",
         html,
         flags=re.IGNORECASE | re.DOTALL,
     )
 
-    escaped = escape(html)
+    # Remove inline event handlers like onclick="..." / onclick='...' / onclick=unquoted
+    html = re.sub(r'\son\w+\s*=\s*"[^"]*"', "", html, flags=re.IGNORECASE)
+    html = re.sub(r"\son\w+\s*=\s*'[^']*'", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"\son\w+\s*=\s*[^\s>]+", "", html, flags=re.IGNORECASE)
 
-    allowed_tags = {
-        "p", "br", "strong", "em", "u", "s",
-        "ul", "ol", "li",
-        "h1", "h2", "h3", "h4",
-        "blockquote", "code", "pre",
-        "a",
-    }
+    # Block javascript: in href/src (double-quoted, single-quoted, and best-effort unquoted)
+    html = re.sub(r'href\s*=\s*"(javascript:[^"]*)"', 'href="#"', html, flags=re.IGNORECASE)
+    html = re.sub(r"href\s*=\s*'(javascript:[^']*)'", "href='#'", html, flags=re.IGNORECASE)
+    html = re.sub(r'href\s*=\s*(javascript:[^\s>]+)', 'href="#"', html, flags=re.IGNORECASE)
 
-    for tag in allowed_tags:
-        escaped = re.sub(fr"&lt;{tag}&gt;", f"<{tag}>", escaped, flags=re.I)
-        escaped = re.sub(fr"&lt;/{tag}&gt;", f"</{tag}>", escaped, flags=re.I)
+    html = re.sub(r'src\s*=\s*"(javascript:[^"]*)"', 'src=""', html, flags=re.IGNORECASE)
+    html = re.sub(r"src\s*=\s*'(javascript:[^']*)'", "src=''", html, flags=re.IGNORECASE)
+    html = re.sub(r"src\s*=\s*(javascript:[^\s>]+)", 'src=""', html, flags=re.IGNORECASE)
 
-    escaped = re.sub(
-        r'<a[^>]*href="([^"]+)"[^>]*>',
-        lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">',
-        escaped,
-        flags=re.I,
+    # Allow only selected tags (keeps attributes on allowed tags)
+    allowed = "p|br|strong|em|u|s|ul|ol|li|h1|h2|h3|h4|blockquote|code|pre|a|img|span|div"
+
+    # Remove any tag not in allowlist (keeps inner text)
+    html = re.sub(
+        rf"</?(?!({allowed})\b)[a-zA-Z0-9]+[^>]*>",
+        "",
+        html,
+        flags=re.IGNORECASE,
     )
 
-    return escaped
+    # Force safe link attrs on <a ...>
+    def _fix_a(m: re.Match) -> str:
+        tag = m.group(0)
+
+        if re.search(r"\btarget\s*=", tag, flags=re.IGNORECASE) is None:
+            tag = tag[:-1] + ' target="_blank">'  # add before >
+        if re.search(r"\brel\s*=", tag, flags=re.IGNORECASE) is None:
+            tag = tag[:-1] + ' rel="noopener noreferrer">'  # add before >
+        return tag
+
+    html = re.sub(r"<a\b[^>]*>", _fix_a, html, flags=re.IGNORECASE)
+
+    return html
 
 
 # ================= PASSWORD POLICY =================
 
-MIN_PASSWORD_LENGTH = int(os.getenv("MIN_PASSWORD_LENGTH", 8))
+MIN_PASSWORD_LENGTH = int(os.getenv("MIN_PASSWORD_LENGTH", "8"))
 
 
-def validate_password_policy(password: str):
+def validate_password_policy(password: str) -> Tuple[bool, Optional[str]]:
+    password = password or ""
     if len(password) < MIN_PASSWORD_LENGTH:
         return False, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long."
     if " " in password:
@@ -138,82 +176,148 @@ def validate_password_policy(password: str):
     return True, None
 
 
-# ================= OTP HELPERS (legacy) =================
+# ================= OTP HELPERS (UPDATED: users table) =================
 
-# NOTE: These functions assume an `otps` table exists. If you are using the newer
-# db_core schema (users.otp_hash + password_reset_otps), you may not need them.
-
-def generate_otp():
+def generate_otp() -> str:
     return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
-def set_user_otp(user_id, purpose, expires=15):
+def _parse_iso_dt(s: str) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def set_user_otp(user_id: int, purpose: str = "verify", expires: int = 15) -> str:
+    """
+    Stores OTP on users table:
+      users.otp_hash
+      users.otp_expires_at
+      users.otp_purpose
+    """
     otp = generate_otp()
-    expiry = datetime.utcnow() + timedelta(minutes=expires)
+    otp_hash = generate_password_hash(otp)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=int(expires))
 
     db = get_db()
     db.execute(
         """
-        INSERT INTO otps (user_id, otp_code, purpose, expires_at, created_at)
-        VALUES (?,?,?,?,?)
+        UPDATE users
+        SET otp_hash=?, otp_expires_at=?, otp_purpose=?
+        WHERE id=?
         """,
-        (user_id, otp, purpose, expiry.isoformat(), datetime.utcnow().isoformat()),
+        (otp_hash, expiry.isoformat(), (purpose or "verify"), int(user_id)),
     )
     db.commit()
     return otp
 
 
-def verify_user_otp(user_id, otp, purpose):
+def verify_user_otp(user_id: int, otp: str, purpose: str = "verify") -> bool:
+    """
+    Verifies OTP against users table fields.
+    """
+    otp = (otp or "").strip()
+    if not otp:
+        return False
+
     db = get_db()
     row = db.execute(
-        """
-        SELECT 1 FROM otps
-        WHERE user_id=? AND otp_code=? AND purpose=? AND expires_at > ?
-        """,
-        (user_id, otp, purpose, datetime.utcnow().isoformat()),
-    ).fetchone()
-    return row is not None
-
-
-def can_resend_otp(user_id, purpose, cooldown=60):
-    db = get_db()
-    row = db.execute(
-        """
-        SELECT created_at FROM otps
-        WHERE user_id=? AND purpose=?
-        ORDER BY id DESC LIMIT 1
-        """,
-        (user_id, purpose),
+        "SELECT otp_hash, otp_expires_at, otp_purpose FROM users WHERE id=?",
+        (int(user_id),),
     ).fetchone()
 
     if not row:
-        return True
+        return False
 
-    created_at = row_get(row, "created_at")
-    if not created_at:
-        return True
+    stored_purpose = (row_get(row, "otp_purpose") or "").strip()
+    if (purpose or "").strip() and stored_purpose and stored_purpose != (purpose or "").strip():
+        return False
 
-    return (datetime.utcnow() - datetime.fromisoformat(created_at)).seconds >= cooldown
+    expires_at = _parse_iso_dt(row_get(row, "otp_expires_at") or "")
+    if not expires_at or expires_at <= datetime.now(timezone.utc):
+        return False
+
+    otp_hash = row_get(row, "otp_hash") or ""
+    if not otp_hash:
+        return False
+
+    try:
+        ok = check_password_hash(otp_hash, otp)
+    except Exception:
+        ok = False
+
+    return bool(ok)
+
+
+def can_resend_otp(user_id: int, purpose: str, cooldown: int = 60) -> bool:
+    """
+    Cooldown check using users.otp_expires_at.
+    Approximation: last_sent = expires_at - 15 minutes.
+    """
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT otp_expires_at, otp_purpose FROM users WHERE id=?",
+            (int(user_id),),
+        ).fetchone()
+
+        if not row:
+            return True
+
+        stored_purpose = (row_get(row, "otp_purpose") or "").strip()
+        if stored_purpose and (purpose or "").strip() and stored_purpose != (purpose or "").strip():
+            return True
+
+        expires_at = _parse_iso_dt(row_get(row, "otp_expires_at") or "")
+        if not expires_at:
+            return True
+
+        last_sent = expires_at - timedelta(minutes=15)
+        return (datetime.now(timezone.utc) - last_sent).total_seconds() >= int(cooldown)
+    except Exception:
+        return True
 
 
 #===========================================================================================
 
-def has_event_access(event_row, user_row=None):
-    """Determine if a user has access to an event."""
+def has_event_access(event_row: Any, user_row: Any = None) -> bool:
+    """
+    Determine if a user has access to an event.
+
+    Supports:
+    - is_public (optional)
+    - owner_user_id (new) OR user_id (legacy)
+    """
     if not event_row:
         return False
 
-    if int(row_get(event_row, "is_public", 1) or 1) == 1:
-        return True
+    is_public = row_get(event_row, "is_public", None)
+    if is_public is not None:
+        try:
+            if int(is_public or 0) == 1:
+                return True
+        except Exception:
+            pass
 
     if not user_row:
         return False
 
     user_id = row_get(user_row, "id")
-    owner_id = row_get(event_row, "user_id")
+    owner_id = row_get(event_row, "owner_user_id", None)
+    if owner_id is None:
+        owner_id = row_get(event_row, "user_id", None)
 
-    if user_id and owner_id and int(user_id) == int(owner_id):
-        return True
+    try:
+        if user_id and owner_id and int(user_id) == int(owner_id):
+            return True
+    except Exception:
+        pass
 
     if (row_get(user_row, "role") or "").lower() == "admin":
         return True
@@ -221,16 +325,12 @@ def has_event_access(event_row, user_row=None):
     return False
 
 
-def event_session_key(event_id):
+def event_session_key(event_id: int) -> str:
     return f"event_{int(event_id)}"
 
 
-def now_iso():
-    return datetime.utcnow().isoformat()
-
-
-def ensure_photos_day_token(session_obj, prefix="photos_day"):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+def ensure_photos_day_token(session_obj: Any, prefix: str = "photos_day") -> str:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"{prefix}_{today}"
 
     token = session_obj.get(key)
@@ -242,13 +342,20 @@ def ensure_photos_day_token(session_obj, prefix="photos_day"):
     return token
 
 
-def log_security_event(user_id, event, ip):
+def log_security_event(user_id: Optional[int], event: str, ip: str) -> None:
+    """
+    Best-effort audit logging. Won't crash if table/columns differ.
+    """
     db = get_db()
-    db.execute(
-        """
-        INSERT INTO audit_logs (user_id, event, ip_address)
-        VALUES (?,?,?)
-        """,
-        (user_id, event, ip),
-    )
-    db.commit()
+    try:
+        db.execute(
+            """
+            INSERT INTO audit_logs (user_id, event, ip_address, created_at)
+            VALUES (?,?,?,?)
+            """,
+            (int(user_id) if user_id else None, (event or ""), (ip or ""), now_iso()),
+        )
+        db.commit()
+    except Exception:
+        # If audit_logs doesn't exist or schema differs, don't break flows
+        pass
