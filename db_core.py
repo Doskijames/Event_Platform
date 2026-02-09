@@ -357,54 +357,6 @@ def _create_schema_sqlite(db: DB):
         """
     )
 
-    
-
-    # Invite Designer + Bulk Jobs
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS invite_designer (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL UNIQUE,
-
-            template_image TEXT DEFAULT '',
-            logo_image TEXT DEFAULT '',
-
-            module_color TEXT DEFAULT '#000000',
-            eye_border_color TEXT DEFAULT '#000000',
-            eye_center_color TEXT DEFAULT '#000000',
-
-            qr_size_px INTEGER DEFAULT 200,
-
-            stage_width INTEGER DEFAULT 0,
-            stage_height INTEGER DEFAULT 0,
-
-            qr_x_pct REAL DEFAULT 0,
-            qr_y_pct REAL DEFAULT 0,
-            qr_w_pct REAL DEFAULT 0,
-
-            created_at TEXT DEFAULT '',
-            updated_at TEXT DEFAULT '',
-
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS invite_jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER NOT NULL,
-
-            file_path TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-
-            FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
-        );
-        """
-    )
-
     db.commit()
 
 
@@ -600,50 +552,6 @@ def _create_schema_postgres(db: DB):
         """
     )
 
-    
-
-    # Invite Designer + Bulk Jobs
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS invite_designer (
-            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            event_id BIGINT NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
-
-            template_image TEXT DEFAULT '',
-            logo_image TEXT DEFAULT '',
-
-            module_color TEXT DEFAULT '#000000',
-            eye_border_color TEXT DEFAULT '#000000',
-            eye_center_color TEXT DEFAULT '#000000',
-
-            qr_size_px INTEGER DEFAULT 200,
-
-            stage_width INTEGER DEFAULT 0,
-            stage_height INTEGER DEFAULT 0,
-
-            qr_x_pct DOUBLE PRECISION DEFAULT 0,
-            qr_y_pct DOUBLE PRECISION DEFAULT 0,
-            qr_w_pct DOUBLE PRECISION DEFAULT 0,
-
-            created_at TEXT DEFAULT '',
-            updated_at TEXT DEFAULT ''
-        );
-        """
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS invite_jobs (
-            id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-
-            file_path TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL
-        );
-        """
-    )
-
     db.commit()
 
 
@@ -721,7 +629,6 @@ DEFAULT_SECTIONS = [
     ("rsvp", "RSVP", 70, ""),
     ("photos", "Photos", 80, ""),
     ("photos-day", "Photos of the Day", 90, ""),
-    ("invite-designer", "Invite Designer", 95, ""),
 ]
 
 
@@ -732,7 +639,7 @@ def ensure_default_sections(event_id: int):
 
     if "title" in cols and "content" in cols and "section_key" in cols:
         for (key, title, sort_order, initial_content) in DEFAULT_SECTIONS:
-            visible = 0 if key == "invite-designer" else 1
+            visible = 1
             content = initial_content
             draft_content = initial_content
             image = ""
