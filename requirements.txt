@@ -9,3 +9,5 @@ google-auth-oauthlib
 requests
 
 
+Pillow
+segno
