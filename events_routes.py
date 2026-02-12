@@ -12,6 +12,9 @@
 
 import os
 import secrets
+import io
+import zipfile
+from datetime import timedelta
 from datetime import datetime, timezone, datetime as dt_cls
 
 from flask import (
@@ -19,6 +22,9 @@ from flask import (
     session, flash, abort, current_app
 )
 from werkzeug.utils import secure_filename
+
+from PIL import Image, ImageDraw
+import segno
 
 # Google Drive uploader (OAuth)
 try:
@@ -63,6 +69,26 @@ def can_manage_event(event_row) -> bool:
     if not u:
         return False
     if (u.get("role") or u["role"] or "").lower() == "admin":
+        return True
+    if event_row.get("owner_user_id") and int(event_row["owner_user_id"]) == int(u["id"]):
+        return True
+    return False
+
+
+def is_platform_admin() -> bool:
+    """Platform admin (site-wide) – NOT the same as event owner."""
+    u = current_user()
+    if not u:
+        return False
+    return (u.get("role") or u["role"] or "").lower() == "admin"
+
+
+def can_use_invite_designer(event_row) -> bool:
+    """Invite Designer usage: platform admin OR event owner."""
+    u = current_user()
+    if not u:
+        return False
+    if is_platform_admin():
         return True
     if event_row.get("owner_user_id") and int(event_row["owner_user_id"]) == int(u["id"]):
         return True
@@ -390,12 +416,17 @@ def register_event_routes(app):
             ("DELETE FROM event_photos WHERE event_id=?", (event_id,)),
             ("DELETE FROM photos_day_settings WHERE event_id=?", (event_id,)),
             ("DELETE FROM rsvp_responses WHERE event_id=?", (event_id,)),
-            ("DELETE FROM rsvps WHERE event_id=?", (event_id,)),  # legacy schema fallback
         ]
         for sql, params in child_deletes:
             try:
                 db.execute(sql, params)
             except Exception:
+                # If any statement fails on Postgres, the transaction becomes aborted until rollback.
+                # We intentionally ignore missing legacy tables here, but must rollback to continue.
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 pass
 
         db.execute("DELETE FROM events WHERE id=?", (event_id,))
@@ -476,6 +507,11 @@ def register_event_routes(app):
             flash("You do not have permission to do that.")
             return redirect(url_for("event_section", slug=slug, section_key=section_key))
 
+        # Invite Designer can only be enabled/disabled by PLATFORM ADMIN (not event owner).
+        if section_key == "invite-designer" and not is_platform_admin():
+            flash("Only platform admins can enable/disable Invite Designer.")
+            return redirect(url_for("event_section", slug=slug, section_key="home"))
+
         ensure_default_sections(event["id"])
         db = get_db()
         sec = db.execute(
@@ -492,6 +528,414 @@ def register_event_routes(app):
 
         flash("Section visibility updated.")
         return redirect(url_for("event_section", slug=slug, section_key=section_key))
+
+    # -------- Invite Designer helpers & routes --------
+    def _generated_root() -> str:
+        """Local, private storage directory for generated ZIPs.
+
+        You can override with env var GENERATED_INVITES_DIR.
+        """
+        base = (os.getenv("GENERATED_INVITES_DIR") or "").strip()
+        if base:
+            return base
+        return os.path.join(current_app.root_path, "generated_invites")
+
+    def _ensure_dir(path: str) -> None:
+        os.makedirs(path, exist_ok=True)
+
+    def _hex_or_default(v: str, default: str = "#000000") -> str:
+        v = (v or "").strip()
+        if not v:
+            return default
+        if not v.startswith("#"):
+            v = "#" + v
+        # minimal validation: '#RRGGBB'
+        if len(v) != 7:
+            return default
+        return v
+
+    def _load_local_static_fs_path(url_or_path: str):
+        """Convert a stored /static/... URL into a filesystem path."""
+        p = (url_or_path or "").strip()
+        if p.startswith("/static/"):
+            return os.path.join(current_app.root_path, p.lstrip("/"))
+        return None
+
+    def _rget(row, key, default=None):
+        """Safe getter for sqlite3.Row or dict rows."""
+        if row is None:
+            return default
+        if isinstance(row, dict):
+            v = row.get(key, default)
+            return default if v is None else v
+        try:
+            v = row[key]
+            return default if v is None else v
+        except Exception:
+            return default
+
+    def _make_styled_qr_png_bytes(
+        data: str,
+        size_px: int,
+        module_color: str,
+        eye_border_color: str,
+        eye_center_color: str,
+        logo_fs=None,
+    ) -> bytes:
+        """Create a styled QR PNG (bytes).
+
+        - segno generates the base QR with module + finder (eye border) color
+        - Pillow recolors the finder eye centers, and optionally composites a logo.
+        """
+        qr = segno.make_qr(data, error="h")  # high error correction for optional logo
+
+        # Determine a scale (pixels per module) such that final image ~ size_px.
+        # segno symbol_size(scale=1) returns (width_in_modules, height_in_modules) including border.
+        w_modules, _ = qr.symbol_size(scale=1, border=4)
+        scale = max(1, int(size_px / max(1, w_modules)))
+
+        buf = io.BytesIO()
+        qr.save(
+            buf,
+            kind="png",
+            scale=scale,
+            border=4,
+            dark=module_color,
+            light="#FFFFFF",
+            finder_dark=eye_border_color,
+            finder_light="#FFFFFF",
+        )
+        buf.seek(0)
+        img = Image.open(buf).convert("RGBA")
+
+        # Recolor finder eye centers (3x3 inside each 7x7 finder)
+        border = 4
+        finder_size = 7
+        center_offset = 2
+        center_size = 3
+
+        def paint_center(fx: int, fy: int):
+            x0 = (border + fx + center_offset) * scale
+            y0 = (border + fy + center_offset) * scale
+            x1 = x0 + center_size * scale
+            y1 = y0 + center_size * scale
+            draw = ImageDraw.Draw(img)
+            draw.rectangle([x0, y0, x1 - 1, y1 - 1], fill=eye_center_color)
+
+        # Finder positions in module coordinates (excluding border)
+        inner_modules = w_modules - border * 2
+        right = inner_modules - finder_size
+        bottom = inner_modules - finder_size
+        paint_center(0, 0)
+        paint_center(right, 0)
+        paint_center(0, bottom)
+
+        # Optional logo
+        if logo_fs and os.path.exists(logo_fs):
+            try:
+                logo = Image.open(logo_fs).convert("RGBA")
+                max_logo = int(img.width * 0.20)
+                logo.thumbnail((max_logo, max_logo))
+                lx = (img.width - logo.width) // 2
+                ly = (img.height - logo.height) // 2
+                img.alpha_composite(logo, (lx, ly))
+            except Exception:
+                pass
+
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        return out.getvalue()
+
+    @app.route("/events/<slug>/invite-designer/save", methods=["POST"])
+    @login_required
+    def invite_designer_save(slug):
+        event = get_event_by_slug(slug)
+        if not event:
+            abort(404)
+        if not has_event_view_access(event):
+            abort(403)
+
+        ensure_default_sections(event["id"])
+        sections = get_event_sections(event["id"])
+        sec = sections.get("invite-designer")
+        if not sec or int(sec["visible"] or 0) == 0:
+            abort(403)
+        if not can_use_invite_designer(event):
+            abort(403)
+
+        # placement (normalized to stage for preview; server uses template px for final)
+        x_pct = float(request.form.get("x_pct") or 0)
+        y_pct = float(request.form.get("y_pct") or 0)
+        w_pct = float(request.form.get("w_pct") or 0)
+        stage_w = int(float(request.form.get("stage_w") or 0))
+        stage_h = int(float(request.form.get("stage_h") or 0))
+
+        # styling
+        module_color = _hex_or_default(request.form.get("module_color"), "#000000")
+        eye_border_color = _hex_or_default(request.form.get("eye_border_color"), "#000000")
+        eye_center_color = _hex_or_default(request.form.get("eye_center_color"), "#000000")
+        qr_size_px = int(float(request.form.get("qr_size_px") or 200))
+        qr_size_px = max(80, min(qr_size_px, 2000))
+
+        db = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        existing = db.execute(
+            "SELECT id FROM invite_designer WHERE event_id=?",
+            (event["id"],),
+        ).fetchone()
+
+        if existing:
+            db.execute(
+                """
+                UPDATE invite_designer
+                SET qr_x_pct=?, qr_y_pct=?, qr_w_pct=?,
+                    stage_width=?, stage_height=?,
+                    module_color=?, eye_border_color=?, eye_center_color=?, qr_size_px=?,
+                    updated_at=?
+                WHERE event_id=?
+                """,
+                (
+                    x_pct,
+                    y_pct,
+                    w_pct,
+                    stage_w,
+                    stage_h,
+                    module_color,
+                    eye_border_color,
+                    eye_center_color,
+                    qr_size_px,
+                    now,
+                    event["id"],
+                ),
+            )
+        else:
+            db.execute(
+                """
+                INSERT INTO invite_designer
+                  (event_id, qr_x_pct, qr_y_pct, qr_w_pct, stage_width, stage_height,
+                   module_color, eye_border_color, eye_center_color, qr_size_px,
+                   created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event["id"],
+                    x_pct,
+                    y_pct,
+                    w_pct,
+                    stage_w,
+                    stage_h,
+                    module_color,
+                    eye_border_color,
+                    eye_center_color,
+                    qr_size_px,
+                    now,
+                    now,
+                ),
+            )
+
+        db.commit()
+        return ("", 204)
+
+    @app.route("/events/<slug>/invite-designer/upload", methods=["POST"])
+    @login_required
+    def invite_designer_upload(slug):
+        event = get_event_by_slug(slug)
+        if not event:
+            abort(404)
+        if not has_event_view_access(event):
+            abort(403)
+
+        ensure_default_sections(event["id"])
+        sections = get_event_sections(event["id"])
+        sec = sections.get("invite-designer")
+        if not sec or int(sec["visible"] or 0) == 0:
+            abort(403)
+        if not can_use_invite_designer(event):
+            abort(403)
+
+        template_file = request.files.get("template")
+        logo_file = request.files.get("logo")
+
+        upload_dir = os.path.join(current_app.static_folder, "uploads")
+        _ensure_dir(upload_dir)
+
+        template_url = None
+        logo_url = None
+
+        if template_file and template_file.filename:
+            if not allowed_file(template_file.filename):
+                flash("Template must be png/jpg/jpeg/webp")
+                return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+            tname = secure_filename(template_file.filename)
+            tfs = os.path.join(upload_dir, tname)
+            template_file.save(tfs)
+            template_url = f"/static/uploads/{tname}"
+
+        if logo_file and logo_file.filename:
+            ext = logo_file.filename.rsplit(".", 1)[-1].lower()
+            if ext != "png":
+                flash("Logo must be a PNG.")
+                return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+            lname = secure_filename(logo_file.filename)
+            lfs = os.path.join(upload_dir, lname)
+            logo_file.save(lfs)
+            logo_url = f"/static/uploads/{lname}"
+
+        db = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        existing = db.execute(
+            "SELECT id FROM invite_designer WHERE event_id=?",
+            (event["id"],),
+        ).fetchone()
+
+        if existing:
+            if template_url:
+                db.execute(
+                    "UPDATE invite_designer SET template_image=?, updated_at=? WHERE event_id=?",
+                    (template_url, now, event["id"]),
+                )
+            if logo_url:
+                db.execute(
+                    "UPDATE invite_designer SET logo_image=?, updated_at=? WHERE event_id=?",
+                    (logo_url, now, event["id"]),
+                )
+        else:
+            db.execute(
+                """
+                INSERT INTO invite_designer (event_id, template_image, logo_image, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (event["id"], template_url or "", logo_url or "", now, now),
+            )
+
+        db.commit()
+        flash("Uploads saved.")
+        return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+
+    @app.route("/events/<slug>/invite-designer/bulk", methods=["POST"])
+    @login_required
+    def invite_designer_bulk(slug):
+        event = get_event_by_slug(slug)
+        if not event:
+            abort(404)
+        if not has_event_view_access(event):
+            abort(403)
+        if not can_use_invite_designer(event):
+            abort(403)
+
+        ensure_default_sections(event["id"])
+        sections = get_event_sections(event["id"])
+        sec = sections.get("invite-designer")
+        if not sec or int(sec["visible"] or 0) == 0:
+            abort(403)
+
+        db = get_db()
+        d = db.execute(
+            "SELECT * FROM invite_designer WHERE event_id=?",
+            (event["id"],),
+        ).fetchone()
+        if not d or not ((d["template_image"] or "").strip()):
+            flash("Upload a template first.")
+            return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+
+        start_num = int(request.form.get("start_num") or 0)
+        end_num = int(request.form.get("end_num") or 0)
+        prefix = (request.form.get("prefix") or "").strip()
+
+        if start_num <= 0 or end_num < start_num:
+            flash("Invalid range.")
+            return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+        if (end_num - start_num) > 2000:
+            flash("Range too large for MVP. Max 2001 items.")
+            return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+
+        template_fs = _load_local_static_fs_path(d["template_image"])
+        if not template_fs or not os.path.exists(template_fs):
+            flash("Template file not found on server.")
+            return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+
+        logo_fs = _load_local_static_fs_path(_rget(d, "logo_image", "") or "")
+
+        module_color = (_rget(d, "module_color", "#000000") or "#000000")
+        eye_border_color = (_rget(d, "eye_border_color", "#000000") or "#000000")
+        eye_center_color = (_rget(d, "eye_center_color", "#000000") or "#000000")
+        qr_size_px = int(_rget(d, "qr_size_px", 200) or 200)
+
+        template = Image.open(template_fs).convert("RGBA")
+        tw, th = template.size
+
+        x = int(float(_rget(d, "qr_x_pct", 0) or 0) * tw)
+        y = int(float(_rget(d, "qr_y_pct", 0) or 0) * th)
+
+        root_out = _generated_root()
+        event_dir = os.path.join(root_out, f"event_{event['id']}")
+        _ensure_dir(event_dir)
+
+        job_token = secrets.token_hex(8)
+        zip_path = os.path.join(event_dir, f"job_{job_token}_{start_num}_{end_num}.zip")
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for n in range(start_num, end_num + 1):
+                code = f"{prefix}{n}" if prefix else str(n)
+
+                qr_png = _make_styled_qr_png_bytes(
+                    code,
+                    qr_size_px,
+                    module_color,
+                    eye_border_color,
+                    eye_center_color,
+                    logo_fs=logo_fs,
+                )
+                qr_img = Image.open(io.BytesIO(qr_png)).convert("RGBA")
+
+                out = template.copy()
+                out.alpha_composite(qr_img, (x, y))
+
+                b = io.BytesIO()
+                out.save(b, format="PNG")
+                zf.writestr(f"{code}.png", b.getvalue())
+
+        created = datetime.now(timezone.utc)
+        expires = created + timedelta(days=5)
+
+        db.execute(
+            "INSERT INTO invite_jobs (event_id, file_path, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (event["id"], zip_path, created.isoformat(), expires.isoformat()),
+        )
+        db.commit()
+
+        flash("Bulk invites generated. Download is available for 5 days.")
+        return redirect(url_for("event_section", slug=slug, section_key="invite-designer"))
+
+    @app.route("/events/<slug>/invite-designer/download/<int:job_id>")
+    @login_required
+    def invite_designer_download(slug, job_id):
+        event = get_event_by_slug(slug)
+        if not event:
+            abort(404)
+        if not has_event_view_access(event):
+            abort(403)
+        if not can_use_invite_designer(event):
+            abort(403)
+
+        db = get_db()
+        job = db.execute(
+            "SELECT * FROM invite_jobs WHERE id=? AND event_id=?",
+            (job_id, event["id"]),
+        ).fetchone()
+        if not job:
+            abort(404)
+
+        exp = dt_cls.fromisoformat(job["expires_at"])
+        if exp < dt_cls.now(timezone.utc):
+            abort(410)
+
+        path = job["file_path"]
+        if not path or not os.path.exists(path):
+            abort(404)
+
+        from flask import send_file
+        return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
     # -------- drafts / publish --------
     @app.route("/events/<slug>/story/draft", methods=["POST"])
@@ -1144,6 +1588,21 @@ def register_event_routes(app):
         draft_preview = bool(real_admin and (request.args.get("_draft") == "1"))
         is_admin = real_admin and (not view_as_user)
 
+        # --------------------------
+        # Invite Designer special rules
+        # - Section is locked (visible=0) until PLATFORM ADMIN enables it.
+        # - Once enabled, platform admin OR event owner may use it.
+        # - Never available in public preview (_as_user) mode.
+        # --------------------------
+        if section_key == "invite-designer":
+            if view_as_user:
+                return render_template("not_found.html", user=current_user()), 404
+            if not can_use_invite_designer(event):
+                return render_template("not_found.html", user=current_user()), 404
+            if int(section["visible"]) == 0 and not is_platform_admin():
+                flash("Invite Designer is locked. Ask a platform admin to enable it.")
+                return redirect(url_for("event_section", slug=slug, section_key="home"))
+
         # Public users (not owner/admin) see the single-page view
         if (not real_admin) and (not view_as_user):
             return redirect(url_for("event_public_all_sections", slug=slug))
@@ -1166,6 +1625,35 @@ def register_event_routes(app):
             return redirect(url_for("event_photos", slug=slug))
         if section_key == "photos-day":
             return redirect(url_for("photos_day_admin", slug=slug))
+
+        if section_key == "invite-designer":
+            db = get_db()
+            designer = db.execute(
+                "SELECT * FROM invite_designer WHERE event_id=?",
+                (event["id"],),
+            ).fetchone()
+            jobs = db.execute(
+                "SELECT * FROM invite_jobs WHERE event_id=? ORDER BY id DESC LIMIT 10",
+                (event["id"],),
+            ).fetchall()
+
+            return render_template(
+                "event_invite_designer.html",
+                user=current_user(),
+                event=event,
+                sections=sections,
+                section_key=section_key,
+                section=section,
+                is_admin=is_admin,
+                view_as_user=view_as_user,
+                draft_preview=draft_preview,
+                public_preview_url=public_preview_url,
+                back_to_editor_url=back_to_editor_url,
+                can_manage=real_admin,
+                platform_admin=is_platform_admin(),
+                designer=designer,
+                jobs=jobs,
+            )
 
         if section_key == "home":
             d = parse_date_iso(event["date_iso"])
@@ -1379,6 +1867,10 @@ def register_event_routes(app):
         for key in order:
             s = sections.get(key)
             if not s:
+                continue
+
+            # Never show Invite Designer in the public single-page view.
+            if key == "invite-designer":
                 continue
 
             if int(row_get(s, "visible", 1) or 0) == 0:
