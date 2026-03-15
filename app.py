@@ -10,7 +10,7 @@ from events_routes import register_event_routes
 from photos_routes import register_photo_routes
 from rsvp_routes import register_rsvp_routes
 
-# Optional: Drive proxy routes (recommended)
+# Optional: Drive proxy routes
 try:
     from drive_media_routes import register_drive_media_routes
 except Exception:
@@ -28,11 +28,11 @@ def create_app():
     app.config["DATABASE"] = os.path.abspath(db_path)
     print("✅ DATABASE:", app.config["DATABASE"])
 
-    # Uploads (local fallback)
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    upload_folder = os.path.join(BASE_DIR, "static", "uploads")
+    # Uploads - now stored on the server
+    upload_folder = (os.getenv("UPLOAD_FOLDER", "/var/www/uploads") or "/var/www/uploads").strip()
     os.makedirs(upload_folder, exist_ok=True)
     app.config["UPLOAD_FOLDER"] = upload_folder
+    print("✅ UPLOAD_FOLDER:", app.config["UPLOAD_FOLDER"])
 
     # Ensure DB closes cleanly
     app.teardown_appcontext(close_db)
@@ -75,14 +75,14 @@ def create_app():
         init_db()
         ensure_default_admin()
 
-    # Media URL helper (local uploads OR full URLs)
+    # Media URL helper
     def media_url(value: str) -> str:
         value = (value or "").strip()
         if not value:
             return ""
         if value.startswith("http://") or value.startswith("https://"):
             return value
-        return url_for("static", filename=f"uploads/{value}")
+        return f"/uploads/{value}"
 
     app.jinja_env.globals["media_url"] = media_url
 
