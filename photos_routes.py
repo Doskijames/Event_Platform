@@ -95,71 +95,26 @@ def _public_media_url(stored_value: str):
     """
     Converts what's stored in DB into a usable URL.
 
-    - If it's already a URL (Google Drive), return it.
-    - If it's a raw Drive file_id (legacy), convert it to a Drive URL.
-    - If it's a local filename AND it exists, return a local URL.
-    - If local filename is missing (common on Render), return empty string to avoid 404 spam.
+    - If it's already a URL, return it.
+    - Else treat it as a local filename under /uploads/.
     """
     v = (stored_value or "").strip()
     if not v:
         return ""
     if _is_url(v):
         return v
-    if _looks_like_drive_file_id(v):
-        return _drive_uc_url(v)
-    if _local_upload_exists(v):
-        return url_for("static", filename=f"uploads/{v}")
-    return ""
+    return f"/uploads/{v}"
+
 def _save_to_storage(file_storage, filename: str) -> str:
     """
-    Saves to Google Drive if configured, otherwise saves to local UPLOAD_FOLDER.
+    Save uploads directly to local server storage.
 
     Returns:
-      - Google Drive public URL (string)
-      - or local filename (fallback)
+      - local filename
     """
-    current_app.logger.warning(
-        "UPLOAD: drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
-        _drive_ok(),
-        bool(upload_file_to_drive),
-        bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-             or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
-    )
-
-    if _drive_ok():
-        try:
-            meta = upload_file_to_drive(file_storage, filename=filename, make_public=True)
-            mime_type = getattr(file_storage, "mimetype", "") or ""
-            mode = "view" if mime_type.startswith("image/") else "download"
-
-            # Dict response
-            if isinstance(meta, dict):
-                url = (meta.get("download_url") or "").strip() or (meta.get("view_url") or "").strip()
-                if url and url.startswith("http"):
-                    return url
-
-                file_id = (meta.get("file_id") or "").strip()
-                if file_id:
-                    return _drive_uc_url(file_id, mode=mode)
-
-            # String response (URL or file_id)
-            if isinstance(meta, str):
-                s = meta.strip()
-                if s.startswith("http"):
-                    return s
-                if s:
-                    return _drive_uc_url(s, mode=mode)
-
-        except Exception as e:
-            current_app.logger.exception("Drive upload failed; falling back to local save. err=%s", e)
-
-    # Local fallback (legacy)
     save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], filename)
     file_storage.save(save_path)
     return filename
-
 
 def get_photos(event_id: int, kind: str):
     rows = get_db().execute(
