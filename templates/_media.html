@@ -6,21 +6,14 @@
   {%- if not v -%}
     {{ '' }}
   {%- elif v.startswith('http://') or v.startswith('https://') -%}
-    {# If it's a Drive URL with an id, route through our proxy endpoint #}
-    {%- set file_id = '' -%}
-    {%- if 'id=' in v -%}
-      {%- set file_id = v.split('id=')[1].split('&')[0] -%}
-    {%- elif '/d/' in v -%}
-      {%- set file_id = v.split('/d/')[1].split('/')[0] -%}
-    {%- endif -%}
-
-    {%- if file_id -%}
-      {{ url_for('media_drive', file_id=file_id) }}
-    {%- else -%}
-      {{ v }}
-    {%- endif -%}
+    {{ v }}
+  {%- elif v.startswith('/uploads/') -%}
+    {{ v }}
+  {%- elif v.startswith('uploads/') -%}
+    {{ '/' ~ v }}
+  {%- elif v.startswith('/var/www/uploads/') -%}
+    {{ '/uploads/' ~ v.split('/')[-1] }}
   {%- else -%}
-    {# A bare filename: serve via /media/<filename> which falls back to Drive if needed #}
-    {{ url_for('media_by_name', filename=v) }}
+    {{ '/uploads/' ~ v }}
   {%- endif -%}
 {%- endmacro %}
