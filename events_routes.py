@@ -209,21 +209,16 @@ def _local_upload_exists(filename: str) -> bool:
 
 def media_url(stored_value: str):
     """
-    If stored_value is already a URL (Drive), return it.
-    If it's a raw Drive file_id (legacy), convert to embed-friendly URL.
-    Else treat it as a local filename under /static/uploads/ (only if file exists).
+    If stored_value is already a URL, return it.
+    Else treat it as a local filename under /uploads/.
     """
     v = (stored_value or "").strip()
     if not v:
         return ""
     if _is_url(v):
         return v
-    if _looks_like_drive_file_id(v):
-        return _drive_uc_view(v)
-    if _local_upload_exists(v):
-        return url_for("static", filename=f"uploads/{v}")
-    # File missing (Render filesystem is ephemeral) -> don't show broken image
-    return ""
+    return f"/uploads/{v}"
+
 def _drive_ok() -> bool:
     """
     True if Drive uploader is available and OAuth env vars are present.
@@ -265,50 +260,11 @@ def _next_sort_order(event_id: int) -> int:
 
 def _drive_upload_image_and_get_url(file_storage, unique_name: str) -> str:
     """
-    Upload to Drive and return a URL suitable for <img src="...">.
-
-    Works with both possible upload_file_to_drive return shapes:
-      - dict: {"file_id","view_url","download_url"}
-      - str:  URL OR "file_id"
+    Save image to local server storage and return the stored filename.
     """
-    if not _drive_ok():
-        return ""
-
-    current_app.logger.warning(
-        "UPLOAD(image): drive_ok=%s upload_func=%s has_folder=%s has_client_json=%s has_refresh=%s",
-        _drive_ok(),
-        bool(upload_file_to_drive),
-        bool((os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON") or "").strip()
-             or (os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON_BASE64") or "").strip()),
-        bool((os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN") or "").strip()),
-    )
-
-    try:
-        res = upload_file_to_drive(file_storage, filename=unique_name, make_public=True)
-
-        # Dict response
-        if isinstance(res, dict):
-            url = (res.get("download_url") or "").strip() or (res.get("view_url") or "").strip()
-            if url and url.startswith("http"):
-                return url
-
-            file_id = (res.get("file_id") or "").strip()
-            if file_id:
-                return _drive_uc_view(file_id)
-            return ""
-
-        # String response (URL or file_id)
-        s = str(res or "").strip()
-        if not s:
-            return ""
-        if s.startswith("http"):
-            return s
-        return _drive_uc_view(s)
-
-    except Exception as e:
-        current_app.logger.exception("Drive upload failed in events_routes. err=%s", e)
-        return ""
+    save_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
+    file_storage.save(save_path)
+    return unique_name
 
 
 # -----------------------------
